@@ -2,41 +2,44 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Prancha tática → Reconstrução 3D</title>
+<title>Prancha tática → 3D</title>
 <style>
   html,body{margin:0;padding:0;background:#0a0a0a;color:#eee;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;height:100%;overflow:hidden;}
   #app{display:flex;flex-direction:column;height:100vh;width:100vw;}
-  #toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 12px;background:#151515;border-bottom:1px solid #262626;}
-  .iconbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:#202020;border:1px solid #333;color:#eee;width:56px;height:52px;border-radius:12px;cursor:pointer;font-size:10px;line-height:1;flex-shrink:0;}
-  .iconbtn .ic{font-size:19px;line-height:1;}
+  #toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px 14px;background:#151515;border-bottom:1px solid #262626;}
+  .iconbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:#202020;border:1px solid #333;color:#eee;width:66px;height:60px;border-radius:14px;cursor:pointer;font-size:11.5px;line-height:1;flex-shrink:0;}
+  .iconbtn .ic{font-size:23px;line-height:1;}
   .iconbtn:hover{background:#2a2a2a;}
   .iconbtn:disabled{opacity:.3;cursor:default;}
   .iconbtn.primary{background:#2c4270;border-color:#3d5a95;}
   .iconbtn.warn{background:#4a2a2a;border-color:#6a3a3a;}
-  #toolbar button.txt{background:#202020;border:1px solid #333;color:#eee;padding:8px 12px;border-radius:10px;font-size:12.5px;cursor:pointer;white-space:nowrap;}
+  #toolbar button.txt{background:#202020;border:1px solid #333;color:#eee;padding:11px 16px;border-radius:12px;font-size:14.5px;cursor:pointer;white-space:nowrap;}
   #toolbar button.txt:hover{background:#2a2a2a;}
   #toolbar button.txt.primary{background:#2c4270;border-color:#3d5a95;}
-  #toolbar .sep{width:1px;height:34px;background:#2c2c2c;margin:0 2px;}
+  #toolbar .sep{width:1px;height:40px;background:#2c2c2c;margin:0 2px;}
+  #stepbar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:#101010;border-bottom:1px solid #262626;}
+  #stepbar button.txt{background:#202020;border:1px solid #333;color:#eee;padding:10px 14px;border-radius:12px;font-size:15px;cursor:pointer;}
+  #stepLabel{font-size:14px;color:#ddd;min-width:70px;text-align:center;font-weight:600;}
+  #stepSlider{flex:1;accent-color:#e0b84a;}
   #stage{flex:1;position:relative;overflow:hidden;background:#0a0a0a;display:flex;align-items:center;justify-content:center;}
   #courtCanvas{touch-action:none;cursor:default;}
-  #bottombar{display:flex;gap:8px;align-items:center;padding:10px 12px;background:#151515;border-top:1px solid #262626;flex-wrap:wrap;}
-  #bottombar button.txt{background:#202020;border:1px solid #333;color:#eee;padding:8px 12px;border-radius:10px;font-size:12.5px;cursor:pointer;}
+  #bottombar{display:flex;gap:8px;align-items:center;padding:10px 14px;background:#151515;border-top:1px solid #262626;flex-wrap:wrap;}
+  #bottombar button.txt{background:#202020;border:1px solid #333;color:#eee;padding:10px 14px;border-radius:12px;font-size:14px;cursor:pointer;}
   #bottombar button.txt:hover{background:#2a2a2a;}
   #bottombar button.txt.primary{background:#2c4270;border-color:#3d5a95;}
   #scrub{flex:1;min-width:80px;accent-color:#8899cc;}
-  .hint{font-size:11px;color:#777;padding:0 12px 8px;background:#151515;}
+  .hint{font-size:11.5px;color:#777;padding:0 14px 8px;background:#151515;}
   .editPop{position:absolute;background:#1e1e1e;border:1px solid #444;border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:6px;z-index:20;box-shadow:0 4px 18px rgba(0,0,0,.5);}
   .editPop input{background:#111;border:1px solid #3a3a3a;color:#eee;padding:5px 7px;border-radius:5px;font-size:13px;width:120px;}
   .editPop .row{display:flex;gap:6px;}
   .editPop button{background:#3a5a8a;border:none;color:#fff;padding:5px 10px;border-radius:5px;font-size:12px;cursor:pointer;}
-  #status{font-size:11px;color:#8a8;margin-left:auto;padding-right:4px;min-width:80px;text-align:right;}
-  select{background:#202020;border:1px solid #333;color:#eee;padding:8px 10px;border-radius:10px;font-size:12.5px;}
+  #status{font-size:12px;color:#8a8;margin-left:auto;padding-right:4px;min-width:80px;text-align:right;}
+  select{background:#202020;border:1px solid #333;color:#eee;padding:9px 12px;border-radius:12px;font-size:14px;}
 
   #viewer3D{display:none;flex-direction:column;height:100%;width:100%;}
   #v3dCanvasWrap{flex:1;position:relative;}
   .hud{position:absolute;left:0;right:0;top:0;padding:12px 16px;display:flex;justify-content:space-between;align-items:flex-start;pointer-events:none;}
   .badge{background:rgba(20,20,20,0.65);border:1px solid #444;border-radius:6px;padding:6px 12px;font-size:12px;letter-spacing:.03em;color:#aaa;}
-  .noPathWarn{color:#e0b84a;}
 </style>
 </head>
 <body>
@@ -49,19 +52,24 @@
       <button id="addRed" class="iconbtn"><span class="ic">🔴</span>Vermelho</button>
       <button id="addBall" class="iconbtn"><span class="ic">⚽</span>Bola</button>
       <div class="sep"></div>
-      <button id="clearPaths" class="iconbtn"><span class="ic">┄</span>Limpar</button>
       <button id="clearAll" class="iconbtn warn"><span class="ic">🗂️</span>Nova</button>
       <div class="sep"></div>
       <button id="saveBtn" class="iconbtn primary"><span class="ic">💾</span>Salvar</button>
       <button id="goto3D" class="iconbtn primary"><span class="ic">🎬</span>Ver 3D</button>
       <span id="status"></span>
     </div>
-    <div class="hint">🟡 Toque no jogador = ele fica amarelo (essa é a visão que vai pro 3D) · arraste o jogador = desenha o trajeto · arraste a bolinha branca do lado dele = escolhe pra onde ele olha · toque 2x = editar nome/número</div>
+    <div id="stepbar">
+      <button id="stepAdd" class="txt">➕ Nova etapa</button>
+      <button id="stepDel" class="txt">➖ Remover</button>
+      <span id="stepLabel">Etapa 1/1</span>
+      <input type="range" id="stepSlider" min="0" max="0" step="1" value="0">
+    </div>
+    <div class="hint">Arraste o jogador = posição dele NESTA etapa · toque nele = seleciona (fica amarelo) e vira a visão do 3D · arraste a bolinha branca = direção do olhar nesta etapa · "➕ Nova etapa" captura a posição atual e cria o próximo passo da jogada</div>
     <div id="stage">
       <canvas id="courtCanvas"></canvas>
     </div>
     <div id="bottombar">
-      <button id="playBtn" class="txt">▶ Reproduzir (2D)</button>
+      <button id="playBtn" class="txt">▶ Reproduzir tudo</button>
       <button id="stopBtn" class="txt">⏹ Parar</button>
       <input type="range" id="scrub" min="0" max="1000" value="0">
       <button class="txt" data-spd="0.5">0.5x</button>
@@ -74,21 +82,20 @@
   <!-- ===================== TELA 2: REPRODUÇÃO 3D ===================== -->
   <div id="viewer3D">
     <div id="toolbar">
-      <button id="backTo2D" class="txt">← Voltar ao editor 2D</button>
+      <button id="backTo2D" class="txt">← Voltar</button>
       <div class="sep"></div>
-      <span style="font-size:12.5px;color:#999;">Visão do jogador:</span>
+      <span style="font-size:13.5px;color:#999;">Visão do jogador:</span>
       <select id="povSelect"></select>
       <div class="sep"></div>
-
-      <div class="sep"></div>
-      <button id="bgPhotoBtn" class="txt">🖼️ Fundo (foto)</button>
-      <input type="file" id="bgPhotoInput" accept="image/*" style="display:none">
-      <span id="povWarn" class="noPathWarn" style="font-size:11.5px;"></span>
+      <button id="bgGoalBtn" class="txt">🥅 Fundo do gol</button>
+      <input type="file" id="bgGoalInput" accept="image/*" style="display:none">
+      <button id="bgStandBtn" class="txt">🏟️ Fundo da arquibancada</button>
+      <input type="file" id="bgStandInput" accept="image/*" style="display:none">
     </div>
     <div id="v3dCanvasWrap">
       <div class="hud">
         <div class="badge">RECONSTRUÇÃO 3D · gerada a partir da prancha tática</div>
-        <div class="badge" id="viewBadge">PRIMEIRA PESSOA</div>
+        <div class="badge">PRIMEIRA PESSOA</div>
       </div>
     </div>
     <div id="bottombar">
@@ -106,59 +113,20 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 /* =========================================================================
-   PARTE 1 — EDITOR 2D (prancha tática: arrastar, gravar caminho, salvar)
-   Modelo: players[]/ball com pos {x,y} em fração 0..1 do retângulo da quadra
-   (x = largura, y = comprimento / eixo dos gols), e path[] {t,x,y} gravado
-   ao arrastar.
+   PARTE 1 — EDITOR 2D EM ETAPAS
+   entities: identidade fixa dos jogadores/bola
+   steps: sequência de "capturas" — cada etapa guarda a posição (fração 0..1)
+   e o ângulo de olhar de cada entidade naquele momento da jogada
    ========================================================================= */
-let players = [];
-let ball = null;
-let nextBlueNum = 1, nextRedNum = 1;
+const COURT_LEN = 52, COURT_WID = 24;
+const MIN_SPEED = 1.4, MAX_SPEED = 7.5, MIN_STEP_DURATION = 0.55;
+
+let entities = [];               // {id, team:'blue'|'red'|'ball', number, name}
+let steps = [ {positions:{}} ];  // {positions:{ [id]: {x,y,facingAngle} }}
+let currentStep = 0;
 let selectedId = null;
 let idCounter = 1;
-
-// Dimensões da quadra (usadas tanto pra recalcular os tempos quanto pro 3D)
-const COURT_LEN = 52, COURT_WID = 24;
-
-// Velocidade mínima e máxima aceitável de movimento (m/s), realista pra futsal.
-// Trajetos mais longos tendem à velocidade máxima; trajetos curtos, à mínima —
-// assim o tempo total de todos os movimentos fica parecido, independente de
-// quão rápido ou devagar você arrastou o dedo pra desenhar.
-const MIN_SPEED = 1.4;  // ~ trote leve
-const MAX_SPEED = 7.5;  // ~ sprint
-
-function pathLengthMeters(path){
-  let L = 0;
-  for(let i=0;i<path.length-1;i++){
-    const dx = (path[i+1].x-path[i].x)*COURT_WID;
-    const dy = (path[i+1].y-path[i].y)*COURT_LEN;
-    L += Math.hypot(dx,dy);
-  }
-  return L;
-}
-
-function retimeAllPaths(){
-  const all = [...players, ...(ball?[ball]:[])].filter(e=>e.path && e.path.length>1);
-  if(all.length===0) return;
-  const withLen = all.map(e=>({e, L: pathLengthMeters(e.path)}));
-  const Lmax = Math.max(...withLen.map(x=>x.L), 0.001);
-  const T = Lmax / MAX_SPEED; // tempo do trajeto mais longo, na velocidade máxima
-  withLen.forEach(({e,L})=>{
-    let speed = T>0 ? L/T : MAX_SPEED;
-    speed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, speed));
-    const duration = speed>0 ? L/speed : 0;
-    const path = e.path;
-    const cum = [0]; let acc = 0;
-    for(let i=0;i<path.length-1;i++){
-      const dx = (path[i+1].x-path[i].x)*COURT_WID;
-      const dy = (path[i+1].y-path[i].y)*COURT_LEN;
-      acc += Math.hypot(dx,dy);
-      cum.push(acc);
-    }
-    const totalLen = cum[cum.length-1] || 1;
-    path.forEach((p,i)=>{ p.t = totalLen>0 ? (cum[i]/totalLen)*duration : 0; });
-  });
-}
+let nextBlueNum = 1, nextRedNum = 1;
 
 const canvas = document.getElementById('courtCanvas');
 const ctx = canvas.getContext('2d');
@@ -212,62 +180,112 @@ function roundRect(x,y,w,h,r){
   ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
 }
 
-function drawToken(entity){
-  const pos = entity.pos;
+function lerpAngle(a,b,u){
+  let diff = ((b-a+Math.PI)%(Math.PI*2))-Math.PI;
+  if(diff<-Math.PI) diff+=Math.PI*2;
+  return a+diff*u;
+}
+
+// posição/ângulo de uma entidade num instante t (segundos) ao longo de TODAS as etapas
+function segmentDuration(i){
+  let maxLen = 0;
+  entities.forEach(e=>{
+    const a = steps[i].positions[e.id], b = steps[i+1].positions[e.id];
+    if(!a||!b) return;
+    const dx=(b.x-a.x)*COURT_WID, dy=(b.y-a.y)*COURT_LEN;
+    maxLen = Math.max(maxLen, Math.hypot(dx,dy));
+  });
+  if(maxLen<0.06) return MIN_STEP_DURATION;
+  return Math.max(maxLen/MAX_SPEED, MIN_STEP_DURATION);
+}
+function allDurations(){ const d=[]; for(let i=0;i<steps.length-1;i++) d.push(segmentDuration(i)); return d; }
+function totalDuration(){ return allDurations().reduce((a,b)=>a+b,0) || 0.01; }
+
+function sampleEntityAt(id, t){
+  if(steps.length===1 || !steps[0].positions[id]) return steps[currentStep].positions[id] || null;
+  const durs = allDurations();
+  let acc = 0;
+  for(let i=0;i<steps.length-1;i++){
+    const dur = durs[i];
+    const a = steps[i].positions[id], b = steps[i+1].positions[id];
+    if(t <= acc+dur || i===steps.length-2){
+      if(!a && !b) { acc+=dur; continue; }
+      if(!a) return b;
+      if(!b) return a;
+      const u = dur>0 ? Math.max(0,Math.min(1,(t-acc)/dur)) : 1;
+      const ue = u*u*(3-2*u);
+      return { x:a.x+(b.x-a.x)*ue, y:a.y+(b.y-a.y)*ue, facingAngle: lerpAngle(a.facingAngle||0, b.facingAngle||0, ue) };
+    }
+    acc += dur;
+  }
+  return steps[steps.length-1].positions[id];
+}
+
+function drawEntityAt(e, pos, isPlaying){
+  if(!pos) return;
   const p = toPx(pos.x, pos.y);
   const R = court.w*0.075;
-  if(entity.path && !playing2D){
+
+  if(e.team!=='ball' && !isPlaying){
+    // trajeto: linha ligando as posições da entidade em cada etapa
     ctx.save();
-    ctx.setLineDash([court.w*0.012, court.w*0.01]);
-    ctx.strokeStyle = entity.team==='blue' ? 'rgba(120,160,255,0.85)' : entity.team==='red' ? 'rgba(255,140,140,0.85)' : 'rgba(255,230,120,0.85)';
-    ctx.lineWidth = Math.max(1.5, court.w*0.006);
+    ctx.setLineDash([court.w*0.01, court.w*0.009]);
+    ctx.strokeStyle = e.team==='blue' ? 'rgba(120,160,255,0.55)' : 'rgba(255,140,140,0.55)';
+    ctx.lineWidth = Math.max(1.5, court.w*0.005);
     ctx.beginPath();
-    entity.path.forEach((pt,i)=>{ const pp = toPx(pt.x,pt.y); if(i===0) ctx.moveTo(pp.x,pp.y); else ctx.lineTo(pp.x,pp.y); });
+    let started = false;
+    steps.forEach(st=>{
+      const sp = st.positions[e.id];
+      if(!sp) return;
+      const pp = toPx(sp.x, sp.y);
+      if(!started){ ctx.moveTo(pp.x,pp.y); started=true; } else ctx.lineTo(pp.x,pp.y);
+    });
     ctx.stroke(); ctx.restore();
-    const last = entity.path[entity.path.length-1];
-    const prev = entity.path[Math.max(0,entity.path.length-3)];
-    const a = toPx(prev.x,prev.y), b = toPx(last.x,last.y);
-    const ang = Math.atan2(b.y-a.y, b.x-a.x);
-    ctx.save(); ctx.translate(b.x,b.y); ctx.rotate(ang);
-    ctx.fillStyle = entity.team==='blue' ? '#7aa0ff' : entity.team==='red' ? '#ff8c8c' : '#ffe678';
-    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-court.w*0.03, court.w*0.014); ctx.lineTo(-court.w*0.03,-court.w*0.014); ctx.closePath(); ctx.fill();
-    ctx.restore();
+    // pontinhos em cada etapa
+    steps.forEach((st,i)=>{
+      const sp = st.positions[e.id];
+      if(!sp) return;
+      const pp = toPx(sp.x, sp.y);
+      ctx.beginPath(); ctx.arc(pp.x,pp.y, i===currentStep? R*0.13 : R*0.08, 0, Math.PI*2);
+      ctx.fillStyle = i===currentStep ? '#fff59d' : 'rgba(255,255,255,0.5)';
+      ctx.fill();
+    });
   }
-  if(entity.team==='ball'){
+
+  if(e.team==='ball'){
     ctx.beginPath(); ctx.arc(p.x,p.y,R*0.55,0,Math.PI*2);
     ctx.fillStyle = '#e8d840'; ctx.fill(); ctx.strokeStyle='#333'; ctx.lineWidth=1.5; ctx.stroke();
     return;
   }
 
-  // indicador de "pra onde ele está olhando" — linha + alça arrastável
-  const facingAngle = entity.facingAngle ?? -Math.PI/2;
-  const handleDist = R*2.0;
-  const hx = p.x + Math.cos(facingAngle)*handleDist;
-  const hy = p.y + Math.sin(facingAngle)*handleDist;
-  ctx.save();
-  ctx.strokeStyle = entity.id===selectedId ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.4)';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(p.x+Math.cos(facingAngle)*R*0.9, p.y+Math.sin(facingAngle)*R*0.9);
-  ctx.lineTo(hx,hy);
-  ctx.stroke();
-  if(entity.id===selectedId){
-    ctx.beginPath(); ctx.arc(hx,hy,R*0.6,0,Math.PI*2);
-    ctx.fillStyle = '#ffffff'; ctx.fill();
-    ctx.strokeStyle = '#333'; ctx.lineWidth = 2; ctx.stroke();
-    // setinha dentro da bolinha, reforçando a direção
-    ctx.save(); ctx.translate(hx,hy); ctx.rotate(facingAngle);
-    ctx.fillStyle = '#333';
-    ctx.beginPath(); ctx.moveTo(R*0.28,0); ctx.lineTo(-R*0.16,R*0.18); ctx.lineTo(-R*0.16,-R*0.18); ctx.closePath(); ctx.fill();
-    ctx.restore();
-  } else {
-    ctx.beginPath(); ctx.arc(hx,hy,R*0.16,0,Math.PI*2);
-    ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fill();
+  if(!isPlaying){
+    const facingAngle = pos.facingAngle ?? -Math.PI/2;
+    const handleDist = R*2.0;
+    const hx = p.x + Math.cos(facingAngle)*handleDist;
+    const hy = p.y + Math.sin(facingAngle)*handleDist;
+    ctx.save();
+    ctx.strokeStyle = e.id===selectedId ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(p.x+Math.cos(facingAngle)*R*0.9, p.y+Math.sin(facingAngle)*R*0.9);
+    ctx.lineTo(hx,hy);
+    ctx.stroke();
+    if(e.id===selectedId){
+      ctx.beginPath(); ctx.arc(hx,hy,R*0.6,0,Math.PI*2);
+      ctx.fillStyle = '#ffffff'; ctx.fill();
+      ctx.strokeStyle = '#333'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.save(); ctx.translate(hx,hy); ctx.rotate(facingAngle);
+      ctx.fillStyle = '#333';
+      ctx.beginPath(); ctx.moveTo(R*0.28,0); ctx.lineTo(-R*0.16,R*0.18); ctx.lineTo(-R*0.16,-R*0.18); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.beginPath(); ctx.arc(hx,hy,R*0.16,0,Math.PI*2);
+      ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fill();
+    }
   }
-  ctx.restore();
 
-  const isPov = entity.id===selectedId;
-  const teamRing = entity.team==='blue' ? '#3a5fd0' : '#c0392b';
+  const isPov = e.id===selectedId;
+  const teamRing = e.team==='blue' ? '#3a5fd0' : '#c0392b';
   const fillColor = isPov ? '#f4c430' : teamRing;
   ctx.beginPath(); ctx.arc(p.x,p.y,R,0,Math.PI*2); ctx.fillStyle = fillColor; ctx.fill();
   ctx.lineWidth = isPov ? 4.5 : 2.5;
@@ -276,32 +294,45 @@ function drawToken(entity){
   ctx.fillStyle = isPov ? '#1a1a1a' : '#fff';
   ctx.font = `700 ${Math.round(R*0.85)}px -apple-system, sans-serif`;
   ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillText(String(entity.number), p.x, p.y+1);
-  if(entity.name){
+  ctx.fillText(String(e.number), p.x, p.y+1);
+  if(e.name){
     ctx.font = `500 ${Math.round(R*0.42)}px -apple-system, sans-serif`;
     ctx.fillStyle = '#f2f2f2';
-    ctx.fillText(entity.name, p.x, p.y+R+R*0.42);
+    ctx.fillText(e.name, p.x, p.y+R+R*0.42);
   }
 }
-function draw(){ drawCourt(); [...players, ...(ball?[ball]:[])].forEach(e=>drawToken(e)); }
 
-let dragging = null, dragStartTime = 0, dragTempPath = [];
+function draw(){
+  drawCourt();
+  entities.forEach(e=>{
+    const pos = steps[currentStep].positions[e.id];
+    drawEntityAt(e, pos, false);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// INTERAÇÃO: arrastar reposiciona na etapa atual; alça branca define o olhar
+// ---------------------------------------------------------------------------
+let dragging = null;
 let rotatingFacing = null;
 let lastTapInfo = {id:null, time:0};
 
 function hitTest(px,py){
   const R = court.w*0.075;
-  const all = [...(ball?[ball]:[]), ...players];
-  for(let i=all.length-1;i>=0;i--){
-    const e = all[i]; const p = toPx(e.pos.x, e.pos.y);
+  for(let i=entities.length-1;i>=0;i--){
+    const e = entities[i];
+    const pos = steps[currentStep].positions[e.id];
+    if(!pos) continue;
+    const p = toPx(pos.x, pos.y);
     if(Math.hypot(px-p.x,py-p.y) <= R*1.15) return e;
   }
   return null;
 }
-function facingHandlePx(entity){
-  const p = toPx(entity.pos.x, entity.pos.y);
+function facingHandlePx(e){
+  const pos = steps[currentStep].positions[e.id];
+  const p = toPx(pos.x, pos.y);
   const R = court.w*0.075;
-  const angle = entity.facingAngle ?? -Math.PI/2;
+  const angle = pos.facingAngle ?? -Math.PI/2;
   const dist = R*2.0;
   return { x: p.x+Math.cos(angle)*dist, y: p.y+Math.sin(angle)*dist, R };
 }
@@ -311,10 +342,9 @@ canvas.addEventListener('pointerdown', (ev)=>{
   if(playing2D) return;
   const p = pointerPos(ev);
 
-  // se já tem um jogador selecionado, primeiro testa a alça de direção dele
   if(selectedId!=null){
-    const sel = [...players, ...(ball?[ball]:[])].find(e=>e.id===selectedId);
-    if(sel && sel.team!=='ball'){
+    const sel = entities.find(e=>e.id===selectedId);
+    if(sel && sel.team!=='ball' && steps[currentStep].positions[sel.id]){
       const h = facingHandlePx(sel);
       if(Math.hypot(p.x-h.x, p.y-h.y) <= h.R*1.1){
         rotatingFacing = sel;
@@ -326,8 +356,7 @@ canvas.addEventListener('pointerdown', (ev)=>{
 
   const hit = hitTest(p.x,p.y);
   if(hit){
-    selectedId = hit.id; dragging = hit; dragStartTime = performance.now();
-    dragTempPath = [{t:0, x:hit.pos.x, y:hit.pos.y}];
+    selectedId = hit.id; dragging = hit;
     canvas.setPointerCapture(ev.pointerId);
     const now = performance.now();
     if(lastTapInfo.id===hit.id && now-lastTapInfo.time < 350){ openEditPopup(hit); dragging = null; }
@@ -339,43 +368,29 @@ canvas.addEventListener('pointermove', (ev)=>{
   if(playing2D) return;
   const p = pointerPos(ev);
   if(rotatingFacing){
-    const c = toPx(rotatingFacing.pos.x, rotatingFacing.pos.y);
-    rotatingFacing.facingAngle = Math.atan2(p.y-c.y, p.x-c.x);
+    const pos = steps[currentStep].positions[rotatingFacing.id];
+    const c = toPx(pos.x, pos.y);
+    pos.facingAngle = Math.atan2(p.y-c.y, p.x-c.x);
     draw();
     return;
   }
   if(!dragging) return;
   const f = toFrac(p.x,p.y);
   f.x = Math.min(1.03, Math.max(-0.03, f.x)); f.y = Math.min(1.03, Math.max(-0.03, f.y));
-  dragging.pos = f;
-  dragTempPath.push({t:(performance.now()-dragStartTime)/1000, x:f.x, y:f.y});
+  const pos = steps[currentStep].positions[dragging.id];
+  pos.x = f.x; pos.y = f.y;
   draw();
 });
-function endDrag(){
-  if(rotatingFacing){ rotatingFacing = null; draw(); return; }
-  if(dragging && dragTempPath.length>3){
-    dragging.path = simplifyPath(dragTempPath);
-    retimeAllPaths();
-  }
-  // se foi só um toque/clique (sem arrasto de verdade), o trajeto existente
-  // NÃO é apagado — só o botão "Limpar trajetos" faz isso.
-  dragging = null; draw();
-}
+function endDrag(){ rotatingFacing = null; dragging = null; draw(); }
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
-function simplifyPath(path){
-  if(path.length<40) return path;
-  const out = [];
-  for(let i=0;i<path.length;i+= Math.ceil(path.length/60)) out.push(path[i]);
-  out.push(path[path.length-1]);
-  return out;
-}
 
 function openEditPopup(entity){
   document.querySelectorAll('.editPop').forEach(e=>e.remove());
   if(entity.team==='ball') return;
   const rect = canvas.getBoundingClientRect();
-  const p = toPx(entity.pos.x, entity.pos.y);
+  const pos = steps[currentStep].positions[entity.id];
+  const p = toPx(pos.x, pos.y);
   const pop = document.createElement('div');
   pop.className='editPop';
   pop.style.left = (rect.left + p.x + 20)+'px';
@@ -395,36 +410,84 @@ document.addEventListener('click', (ev)=>{
   if(!ev.target.closest('.editPop') && !ev.target.closest('#courtCanvas')) document.querySelectorAll('.editPop').forEach(e=>e.remove());
 });
 
+// ---------------------------------------------------------------------------
+// ADICIONAR / REMOVER ENTIDADES
+// ---------------------------------------------------------------------------
+function addEntityToAllSteps(id, pos){
+  steps.forEach(st=>{ if(!st.positions[id]) st.positions[id] = {x:pos.x, y:pos.y, facingAngle:pos.facingAngle}; });
+}
 document.getElementById('addBlue').onclick = ()=>{
-  players.push({id:idCounter++, team:'blue', number:nextBlueNum++, name:'', pos:{x:0.5+Math.random()*0.1-0.05,y:0.35}, path:null, facingAngle:-Math.PI/2});
+  const id = idCounter++;
+  const pos = {x:0.5+Math.random()*0.1-0.05, y:0.35, facingAngle:-Math.PI/2};
+  entities.push({id, team:'blue', number:nextBlueNum++, name:''});
+  addEntityToAllSteps(id, pos);
   draw(); refreshPovSelect();
 };
 document.getElementById('addRed').onclick = ()=>{
-  players.push({id:idCounter++, team:'red', number:nextRedNum++, name:'', pos:{x:0.5+Math.random()*0.1-0.05,y:0.6}, path:null, facingAngle:Math.PI/2});
+  const id = idCounter++;
+  const pos = {x:0.5+Math.random()*0.1-0.05, y:0.6, facingAngle:Math.PI/2};
+  entities.push({id, team:'red', number:nextRedNum++, name:''});
+  addEntityToAllSteps(id, pos);
   draw(); refreshPovSelect();
 };
 document.getElementById('addBall').onclick = ()=>{
-  if(ball) return;
-  ball = {id:idCounter++, team:'ball', number:'', name:'', pos:{x:0.5,y:0.5}, path:null};
-  document.getElementById('addBall').disabled = true; draw();
+  if(entities.find(e=>e.team==='ball')) return;
+  const id = idCounter++;
+  entities.push({id, team:'ball', number:'', name:''});
+  addEntityToAllSteps(id, {x:0.5,y:0.5});
+  document.getElementById('addBall').disabled = true;
+  draw();
 };
-document.getElementById('clearPaths').onclick = ()=>{ players.forEach(p=>p.path=null); if(ball) ball.path=null; draw(); };
 document.getElementById('clearAll').onclick = ()=>{
-  players = []; ball = null; selectedId = null; nextBlueNum=1; nextRedNum=1;
-  document.getElementById('addBall').disabled = false; draw(); refreshPovSelect();
+  entities = []; steps=[{positions:{}}]; currentStep=0; selectedId = null; nextBlueNum=1; nextRedNum=1;
+  document.getElementById('addBall').disabled = false;
+  updateStepUI(); draw(); refreshPovSelect();
 };
 document.getElementById('delBtn').onclick = ()=>{
   if(selectedId==null) return;
-  if(ball && ball.id===selectedId){ ball=null; document.getElementById('addBall').disabled=false; }
-  players = players.filter(p=>p.id!==selectedId);
-  selectedId = null; retimeAllPaths(); draw(); refreshPovSelect();
+  entities = entities.filter(e=>e.id!==selectedId);
+  steps.forEach(st=>{ delete st.positions[selectedId]; });
+  if(entities.every(e=>e.team!=='ball')) document.getElementById('addBall').disabled = false;
+  selectedId = null; draw(); refreshPovSelect();
 };
 
-const STORAGE_KEY = 'tactics_board_v1';
+// ---------------------------------------------------------------------------
+// ETAPAS (steps)
+// ---------------------------------------------------------------------------
+function updateStepUI(){
+  document.getElementById('stepLabel').textContent = `Etapa ${currentStep+1}/${steps.length}`;
+  const sl = document.getElementById('stepSlider');
+  sl.max = Math.max(0, steps.length-1);
+  sl.value = currentStep;
+}
+document.getElementById('stepAdd').onclick = ()=>{
+  const copy = {};
+  Object.keys(steps[currentStep].positions).forEach(id=>{
+    copy[id] = {...steps[currentStep].positions[id]};
+  });
+  steps.splice(currentStep+1, 0, {positions:copy});
+  currentStep++;
+  updateStepUI(); draw();
+};
+document.getElementById('stepDel').onclick = ()=>{
+  if(steps.length<=1) return;
+  steps.splice(currentStep,1);
+  currentStep = Math.min(currentStep, steps.length-1);
+  updateStepUI(); draw();
+};
+document.getElementById('stepSlider').addEventListener('input',(e)=>{
+  currentStep = parseInt(e.target.value);
+  updateStepUI(); draw();
+});
+
+// ---------------------------------------------------------------------------
+// SALVAR / CARREGAR
+// ---------------------------------------------------------------------------
+const STORAGE_KEY = 'tactics_board_v2';
 async function saveBoard(){
   const status = document.getElementById('status');
   try{
-    const data = JSON.stringify({players, ball, nextBlueNum, nextRedNum});
+    const data = JSON.stringify({entities, steps, nextBlueNum, nextRedNum});
     const res = await window.storage.set(STORAGE_KEY, data, false);
     status.textContent = res ? '✓ salvo' : 'falha ao salvar';
     setTimeout(()=>status.textContent='', 2000);
@@ -435,70 +498,53 @@ async function loadBoard(){
     const res = await window.storage.get(STORAGE_KEY, false);
     if(res && res.value){
       const data = JSON.parse(res.value);
-      players = data.players || []; ball = data.ball || null;
+      entities = data.entities || [];
+      steps = (data.steps && data.steps.length) ? data.steps : [{positions:{}}];
+      currentStep = 0;
       nextBlueNum = data.nextBlueNum || 1; nextRedNum = data.nextRedNum || 1;
-      idCounter = Math.max(1, ...players.map(p=>p.id+1), ball?ball.id+1:1);
-      document.getElementById('addBall').disabled = !!ball;
-      retimeAllPaths();
-      draw(); refreshPovSelect();
+      idCounter = Math.max(1, ...entities.map(e=>e.id+1), 1);
+      document.getElementById('addBall').disabled = !!entities.find(e=>e.team==='ball');
+      updateStepUI(); draw(); refreshPovSelect();
     }
   }catch(e){}
 }
 document.getElementById('saveBtn').onclick = saveBoard;
 
+// ---------------------------------------------------------------------------
+// REPRODUÇÃO 2D (pré-visualização de todas as etapas em sequência)
+// ---------------------------------------------------------------------------
 let playing2D = false, playStart2D = 0, speed2D = 1;
-function maxDuration(list){
-  let m = 0;
-  list.forEach(e=>{ if(e.path && e.path.length) m = Math.max(m, e.path[e.path.length-1].t); });
-  return m || 2;
-}
-function sampleAt(entity, t){
-  if(!entity.path || entity.path.length===0) return entity.pos;
-  const path = entity.path;
-  if(t<=path[0].t) return {x:path[0].x,y:path[0].y};
-  if(t>=path[path.length-1].t) return {x:path[path.length-1].x,y:path[path.length-1].y};
-  for(let i=0;i<path.length-1;i++){
-    if(t>=path[i].t && t<=path[i+1].t){
-      const u = (t-path[i].t)/((path[i+1].t-path[i].t)||1);
-      return { x: path[i].x+(path[i+1].x-path[i].x)*u, y: path[i].y+(path[i+1].y-path[i].y)*u };
-    }
-  }
-  return entity.pos;
-}
 function playLoop2D(){
   if(!playing2D) return;
   const elapsed = (performance.now()-playStart2D)/1000 * speed2D;
-  const all = [...players, ...(ball?[ball]:[])];
-  const dur = maxDuration(all);
+  const dur = totalDuration();
   const t = Math.min(elapsed, dur);
   document.getElementById('scrub').value = Math.round(t/dur*1000);
   drawCourt();
-  all.forEach(e=>{
-    const realPos = e.pos;
-    if(e.path) e.pos = sampleAt(e,t);
-    drawToken(e);
-    e.pos = realPos;
+  entities.forEach(e=>{
+    const pos = sampleEntityAt(e.id, t);
+    drawEntityAt(e, pos, true);
   });
-  if(elapsed>=dur){ playing2D=false; document.getElementById('playBtn').textContent='▶ Reproduzir (2D)'; return; }
+  if(elapsed>=dur){ playing2D=false; document.getElementById('playBtn').textContent='▶ Reproduzir tudo'; return; }
   requestAnimationFrame(playLoop2D);
 }
 document.getElementById('playBtn').onclick = ()=>{
-  if(playing2D){ playing2D=false; document.getElementById('playBtn').textContent='▶ Reproduzir (2D)'; return; }
+  if(playing2D){ playing2D=false; document.getElementById('playBtn').textContent='▶ Reproduzir tudo'; return; }
+  if(steps.length<2){ return; }
   playing2D = true; playStart2D = performance.now();
   document.getElementById('playBtn').textContent = '⏸ Pausar';
   playLoop2D();
 };
 document.getElementById('stopBtn').onclick = ()=>{
-  playing2D = false; document.getElementById('playBtn').textContent='▶ Reproduzir (2D)';
+  playing2D = false; document.getElementById('playBtn').textContent='▶ Reproduzir tudo';
   document.getElementById('scrub').value = 0; draw();
 };
 document.getElementById('scrub').addEventListener('input', (e)=>{
-  playing2D = false; document.getElementById('playBtn').textContent='▶ Reproduzir (2D)';
-  const all = [...players, ...(ball?[ball]:[])];
-  const dur = maxDuration(all);
+  playing2D = false; document.getElementById('playBtn').textContent='▶ Reproduzir tudo';
+  const dur = totalDuration();
   const t = (e.target.value/1000)*dur;
   drawCourt();
-  all.forEach(en=>{ const realPos = en.pos; if(en.path) en.pos = sampleAt(en,t); drawToken(en); en.pos = realPos; });
+  entities.forEach(en=>{ const pos = sampleEntityAt(en.id, t); drawEntityAt(en, pos, true); });
 });
 document.querySelectorAll('#editorScreen #bottombar button[data-spd]').forEach(b=>{
   b.addEventListener('click', ()=>{
@@ -508,157 +554,39 @@ document.querySelectorAll('#editorScreen #bottombar button[data-spd]').forEach(b
 });
 
 window.addEventListener('resize', ()=>{ if(document.getElementById('editorScreen').style.display!=='none') layoutCanvas(); });
-loadBoard().then(layoutCanvas);
+loadBoard().then(()=>{ updateStepUI(); layoutCanvas(); });
+updateStepUI();
 layoutCanvas();
 
 /* =========================================================================
-   PARTE 2 — REPRODUÇÃO 3D (three.js), a partir dos mesmos dados
+   PARTE 2 — REPRODUÇÃO 3D (three.js)
    ========================================================================= */
-let three = null; // guarda referências depois de iniciado
+let three = null;
 
 function toWorld(fx, fy){
-  // fy = eixo dos gols (comprimento), fx = largura
   return new THREE.Vector3((fy-0.5)*COURT_LEN, 0, (fx-0.5)*COURT_WID);
 }
 
-function buildTracksSnapshot(){
-  // clona players/ball atuais convertendo path (fração 2D) em pontos de mundo 3D
-  function conv(entity){
-    const basePos = toWorld(entity.pos.x, entity.pos.y);
-    let path3D = null;
-    if(entity.path && entity.path.length>1){
-      path3D = entity.path.map(p=>({t:p.t, pos:toWorld(p.x,p.y)}));
-    }
-    const angle = entity.facingAngle ?? -Math.PI/2;
-    const facingDir = new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle));
-    return {id:entity.id, team:entity.team, number:entity.number, name:entity.name, staticPos:basePos, path:path3D, facingDir};
-  }
+function buildSnapshot(){
   return {
-    players: players.map(conv),
-    ball: ball ? conv(ball) : null
+    entities: entities.map(e=>({id:e.id, team:e.team, number:e.number, name:e.name}))
   };
 }
-
-function sample3D(tr, t){
-  if(!tr.path) return tr.staticPos.clone();
-  const path = tr.path;
-  if(t<=path[0].t) return path[0].pos.clone();
-  if(t>=path[path.length-1].t) return path[path.length-1].pos.clone();
-  for(let i=0;i<path.length-1;i++){
-    if(t>=path[i].t && t<=path[i+1].t){
-      const u = (t-path[i].t)/((path[i+1].t-path[i].t)||1);
-      const s = u*u*(3-2*u);
-      return path[i].pos.clone().lerp(path[i+1].pos, s);
-    }
-  }
-  return tr.staticPos.clone();
+function sample3D(id, t){
+  const p = sampleEntityAt(id, t);
+  if(!p) return null;
+  return { pos: toWorld(p.x,p.y), facingAngle: p.facingAngle ?? -Math.PI/2 };
 }
-function velocity3D(tr, t, dt=0.05){
-  const a = sample3D(tr, t-dt), b = sample3D(tr, t+dt);
-  return b.clone().sub(a).multiplyScalar(1/(2*dt));
-}
-function duration3D(snapshot){
-  let m = 0;
-  [...snapshot.players, ...(snapshot.ball?[snapshot.ball]:[])].forEach(tr=>{
-    if(tr.path) m = Math.max(m, tr.path[tr.path.length-1].t);
-  });
-  return m || 2;
-}
-
-function initThree(){
-  const wrap = document.getElementById('v3dCanvasWrap');
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1b1b1b);
-  scene.fog = new THREE.Fog(0x1b1b1b, 34, 100);
-  const renderer = new THREE.WebGLRenderer({antialias:true});
-  renderer.setSize(wrap.clientWidth, wrap.clientHeight);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  wrap.appendChild(renderer.domElement);
-  const camera = new THREE.PerspectiveCamera(72, wrap.clientWidth/wrap.clientHeight, 0.05, 300);
-
-  scene.add(new THREE.AmbientLight(0x888888, 0.75));
-  const dl = new THREE.DirectionalLight(0xffffff, 0.75);
-  dl.castShadow = true;
-  dl.shadow.mapSize.set(2048,2048);
-  dl.shadow.camera.left = -COURT_LEN/2-4; dl.shadow.camera.right = COURT_LEN/2+4;
-  dl.shadow.camera.top = COURT_WID/2+4; dl.shadow.camera.bottom = -COURT_WID/2-4;
-  dl.shadow.camera.near = 1; dl.shadow.camera.far = 60;
-  dl.shadow.bias = -0.0015;
-  dl.position.set(10,25,10); scene.add(dl);
-
-  // holofotes de ginásio (sem sombra, só clarão dramático)
-  [[-COURT_LEN*0.25,14,-COURT_WID*0.3],[COURT_LEN*0.25,14,COURT_WID*0.3]].forEach(p=>{
-    const sp = new THREE.PointLight(0xfff4e0, 0.35, 45);
-    sp.position.set(p[0],p[1],p[2]);
-    scene.add(sp);
-  });
-
-  const courtMat = new THREE.MeshLambertMaterial({color:0x3a3a3a});
-  const courtPlane = new THREE.Mesh(new THREE.PlaneGeometry(COURT_LEN, COURT_WID), courtMat);
-  courtPlane.rotation.x = -Math.PI/2; courtPlane.receiveShadow = true; scene.add(courtPlane);
-  function addLine(points, color=0x999999){
-    const g = new THREE.BufferGeometry().setFromPoints(points.map(p=>new THREE.Vector3(p[0],0.02,p[1])));
-    scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({color})));
-  }
-  const HL = COURT_LEN/2, HW = COURT_WID/2;
-  addLine([[-HL,-HW],[HL,-HW],[HL,HW],[-HL,HW],[-HL,-HW]]);
-  addLine([[0,-HW],[0,HW]]);
-  const cpts=[]; for(let i=0;i<=64;i++){const a=i/64*Math.PI*2; cpts.push(new THREE.Vector3(Math.cos(a)*3,0.02,Math.sin(a)*3));}
-  scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(cpts), new THREE.LineBasicMaterial({color:0x999999})));
-  addLine([[HL-4,-HW+4],[HL,-HW+4],[HL,HW-4],[HL-4,HW-4]]);
-  addLine([[-HL+4,-HW+4],[-HL,-HW+4],[-HL,HW-4],[-HL+4,HW-4]]);
-  addLine([[HL,-3],[HL,3]],0xdddddd);
-  addLine([[-HL,-3],[-HL,3]],0xdddddd);
-
-  // ---- gol simples (postes + travessão), um em cada linha de fundo ----
-  function buildGoalFrame(xSign){
-    const group = new THREE.Group();
-    const postMat = new THREE.MeshLambertMaterial({color:0xf2f2f2});
-    const postR = 0.06, gw = 3, gh = 2;
-    const xFace = xSign*HL;
-    [-gw/2, gw/2].forEach(z=>{
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(postR,postR,gh,8), postMat);
-      post.position.set(xFace, gh/2, z); group.add(post);
-    });
-    const cross = new THREE.Mesh(new THREE.CylinderGeometry(postR,postR,gw,8), postMat);
-    cross.rotation.z = Math.PI/2; cross.position.set(xFace, gh, 0); group.add(cross);
-    return group;
-  }
-  scene.add(buildGoalFrame(1));
-  scene.add(buildGoalFrame(-1));
-
-  // ---- arquibancada básica, dos dois lados ----
-  function buildBleachers(zSign){
-    const rows = 6, rowH = 0.42, rowD = 0.8;
-    const seatMat = new THREE.MeshLambertMaterial({color:0x2c2c2c});
-    const group = new THREE.Group();
-    const spanL = HL + 6;
-    for(let r=0;r<rows;r++){
-      const step = new THREE.Mesh(new THREE.BoxGeometry(spanL*2, rowH, rowD), seatMat);
-      step.position.set(0, rowH/2 + r*rowH, zSign*(HW + 2.5 + r*rowD));
-      group.add(step);
-    }
-    return group;
-  }
-  scene.add(buildBleachers(1));
-  scene.add(buildBleachers(-1));
-
-  three = {scene, renderer, camera, wrap, meshes:{}, t:0, playing:true, speed:1, fpMode:true, shakeSeed:Math.random()*1000, snapshot:null, povId:null, lastFrame:performance.now()};
-
-  window.addEventListener('resize', ()=>{
-    if(!three) return;
-    three.camera.aspect = three.wrap.clientWidth/three.wrap.clientHeight;
-    three.camera.updateProjectionMatrix();
-    three.renderer.setSize(three.wrap.clientWidth, three.wrap.clientHeight);
-  });
+function velocity3D(id, t, dt=0.05){
+  const a = sample3D(id, Math.max(0,t-dt)), b = sample3D(id, t+dt);
+  if(!a||!b) return new THREE.Vector3();
+  return b.pos.clone().sub(a.pos).multiplyScalar(1/(2*dt));
 }
 
 function makeNumberTexture(text, team){
   const c = document.createElement('canvas');
   c.width = 128; c.height = 128;
   const ctx2 = c.getContext('2d');
-  ctx2.clearRect(0,0,128,128);
   ctx2.fillStyle = team==='blue' ? '#3a5fd0' : '#c0392b';
   ctx2.beginPath(); ctx2.arc(64,64,58,0,Math.PI*2); ctx2.fill();
   ctx2.strokeStyle = 'rgba(255,255,255,0.85)'; ctx2.lineWidth = 5; ctx2.stroke();
@@ -666,10 +594,8 @@ function makeNumberTexture(text, team){
   ctx2.font = '700 64px -apple-system, sans-serif';
   ctx2.textAlign = 'center'; ctx2.textBaseline = 'middle';
   ctx2.fillText(String(text||''), 64, 68);
-  const tex = new THREE.CanvasTexture(c);
-  return tex;
+  return new THREE.CanvasTexture(c);
 }
-
 function makeSoccerBallTexture(){
   const c = document.createElement('canvas');
   c.width = 256; c.height = 128;
@@ -685,8 +611,8 @@ function makeSoccerBallTexture(){
     }
     ctx2.closePath(); ctx2.fill();
   };
-  const spots = [[32,20],[96,16],[160,24],[224,18],[16,64],[80,60],[144,66],[208,60],[48,108],[112,112],[176,106],[240,110]];
-  spots.forEach(([x,y])=>pent(x,y,13));
+  [[32,20],[96,16],[160,24],[224,18],[16,64],[80,60],[144,66],[208,60],[48,108],[112,112],[176,106],[240,110]]
+    .forEach(([x,y])=>pent(x,y,13));
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
   return tex;
@@ -706,7 +632,6 @@ function makePlayerMesh(team, numberText){
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.15,12,10), skinMat);
   head.position.y = 0.77; torsoPivot.add(head);
 
-  // número da camisa (frente e costas)
   if(numberText){
     const numTex = makeNumberTexture(numberText, team);
     const numMat = new THREE.MeshBasicMaterial({map:numTex, transparent:true});
@@ -737,23 +662,123 @@ function makePlayerMesh(team, numberText){
   return g;
 }
 
+function initThree(){
+  const wrap = document.getElementById('v3dCanvasWrap');
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x1b1b1b);
+  scene.fog = new THREE.Fog(0x1b1b1b, 40, 130);
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  wrap.appendChild(renderer.domElement);
+  const camera = new THREE.PerspectiveCamera(72, wrap.clientWidth/wrap.clientHeight, 0.05, 300);
+
+  scene.add(new THREE.AmbientLight(0x888888, 0.75));
+  const dl = new THREE.DirectionalLight(0xffffff, 0.75);
+  dl.castShadow = true;
+  dl.shadow.mapSize.set(2048,2048);
+  dl.shadow.camera.left = -COURT_LEN/2-4; dl.shadow.camera.right = COURT_LEN/2+4;
+  dl.shadow.camera.top = COURT_WID/2+4; dl.shadow.camera.bottom = -COURT_WID/2-4;
+  dl.shadow.camera.near = 1; dl.shadow.camera.far = 60;
+  dl.shadow.bias = -0.0015;
+  dl.position.set(10,25,10); scene.add(dl);
+
+  [[-COURT_LEN*0.25,14,-COURT_WID*0.3],[COURT_LEN*0.25,14,COURT_WID*0.3]].forEach(p=>{
+    const sp = new THREE.PointLight(0xfff4e0, 0.35, 45);
+    sp.position.set(p[0],p[1],p[2]);
+    scene.add(sp);
+  });
+
+  const HL = COURT_LEN/2, HW = COURT_WID/2;
+
+  const courtMat = new THREE.MeshLambertMaterial({color:0x3a3a3a});
+  const courtPlane = new THREE.Mesh(new THREE.PlaneGeometry(COURT_LEN, COURT_WID), courtMat);
+  courtPlane.rotation.x = -Math.PI/2; courtPlane.receiveShadow = true; scene.add(courtPlane);
+
+  function addLine(points, color=0x999999){
+    const g = new THREE.BufferGeometry().setFromPoints(points.map(p=>new THREE.Vector3(p[0],0.02,p[1])));
+    scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({color})));
+  }
+  addLine([[-HL,-HW],[HL,-HW],[HL,HW],[-HL,HW],[-HL,-HW]]);
+  addLine([[0,-HW],[0,HW]]);
+  const cpts=[]; for(let i=0;i<=64;i++){const a=i/64*Math.PI*2; cpts.push(new THREE.Vector3(Math.cos(a)*3,0.02,Math.sin(a)*3));}
+  scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(cpts), new THREE.LineBasicMaterial({color:0x999999})));
+  addLine([[HL-4,-HW+4],[HL,-HW+4],[HL,HW-4],[HL-4,HW-4]]);
+  addLine([[-HL+4,-HW+4],[-HL,-HW+4],[-HL,HW-4],[-HL+4,HW-4]]);
+  addLine([[HL,-3],[HL,3]],0xdddddd);
+  addLine([[-HL,-3],[-HL,3]],0xdddddd);
+
+  // gol simples (postes + travessão)
+  function buildGoalFrame(xSign){
+    const group = new THREE.Group();
+    const postMat = new THREE.MeshLambertMaterial({color:0xf2f2f2});
+    const postR = 0.06, gw = 3, gh = 2;
+    const xFace = xSign*HL;
+    [-gw/2, gw/2].forEach(z=>{
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(postR,postR,gh,8), postMat);
+      post.position.set(xFace, gh/2, z); group.add(post);
+    });
+    const cross = new THREE.Mesh(new THREE.CylinderGeometry(postR,postR,gw,8), postMat);
+    cross.rotation.z = Math.PI/2; cross.position.set(xFace, gh, 0); group.add(cross);
+    return group;
+  }
+  scene.add(buildGoalFrame(1));
+  scene.add(buildGoalFrame(-1));
+
+  // ---- fundos: um par atrás dos gols, outro par atrás das arquibancadas/laterais ----
+  const backdropMatGoal1 = new THREE.MeshBasicMaterial({color:0x2a2a2a});
+  const backdropMatGoal2 = new THREE.MeshBasicMaterial({color:0x2a2a2a});
+  const goalBackdropH = 16, goalBackdropW = COURT_WID+14;
+  const goalBackdrop1 = new THREE.Mesh(new THREE.PlaneGeometry(goalBackdropW, goalBackdropH), backdropMatGoal1);
+  goalBackdrop1.position.set(HL+9, goalBackdropH/2-1, 0); goalBackdrop1.rotation.y = -Math.PI/2;
+  scene.add(goalBackdrop1);
+  const goalBackdrop2 = new THREE.Mesh(new THREE.PlaneGeometry(goalBackdropW, goalBackdropH), backdropMatGoal2);
+  goalBackdrop2.position.set(-HL-9, goalBackdropH/2-1, 0); goalBackdrop2.rotation.y = Math.PI/2;
+  scene.add(goalBackdrop2);
+
+  const backdropMatStand1 = new THREE.MeshBasicMaterial({color:0x232323});
+  const backdropMatStand2 = new THREE.MeshBasicMaterial({color:0x232323});
+  const standBackdropW = COURT_LEN+18, standBackdropH = 16;
+  const standBackdrop1 = new THREE.Mesh(new THREE.PlaneGeometry(standBackdropW, standBackdropH), backdropMatStand1);
+  standBackdrop1.position.set(0, standBackdropH/2-1, HW+9); standBackdrop1.rotation.y = Math.PI;
+  scene.add(standBackdrop1);
+  const standBackdrop2 = new THREE.Mesh(new THREE.PlaneGeometry(standBackdropW, standBackdropH), backdropMatStand2);
+  standBackdrop2.position.set(0, standBackdropH/2-1, -HW-9);
+  scene.add(standBackdrop2);
+
+  three = {
+    scene, renderer, camera, wrap, meshes:{}, t:0, playing:true, speed:1,
+    shakeSeed:Math.random()*1000, povId:null, lastFrame:performance.now(),
+    backdrops:{ goal:[backdropMatGoal1,backdropMatGoal2], stand:[backdropMatStand1,backdropMatStand2] },
+    transition:null
+  };
+
+  window.addEventListener('resize', ()=>{
+    if(!three) return;
+    three.camera.aspect = three.wrap.clientWidth/three.wrap.clientHeight;
+    three.camera.updateProjectionMatrix();
+    three.renderer.setSize(three.wrap.clientWidth, three.wrap.clientHeight);
+  });
+}
+
 function rebuild3DScene(){
-  // remove meshes antigos de jogadores/bola
   Object.values(three.meshes).forEach(m=>three.scene.remove(m));
   three.meshes = {};
-  three.snapshot = buildTracksSnapshot();
-  three.snapshot.players.forEach(tr=>{
-    const mesh = makePlayerMesh(tr.team, tr.number);
-    three.scene.add(mesh);
-    three.meshes[tr.id] = mesh;
+  three.snap = buildSnapshot();
+  three.snap.entities.forEach(e=>{
+    if(e.team==='ball'){
+      const ballTex = makeSoccerBallTexture();
+      const ballMesh = new THREE.Mesh(new THREE.SphereGeometry(0.14,20,20), new THREE.MeshStandardMaterial({map:ballTex, roughness:0.6}));
+      ballMesh.castShadow = true;
+      three.scene.add(ballMesh);
+      three.meshes[e.id] = ballMesh;
+    } else {
+      const mesh = makePlayerMesh(e.team, e.number);
+      three.scene.add(mesh);
+      three.meshes[e.id] = mesh;
+    }
   });
-  if(three.snapshot.ball){
-    const ballTex = makeSoccerBallTexture();
-    const ballMesh = new THREE.Mesh(new THREE.SphereGeometry(0.14,20,20), new THREE.MeshStandardMaterial({map:ballTex, roughness:0.6}));
-    ballMesh.castShadow = true;
-    three.scene.add(ballMesh);
-    three.meshes[three.snapshot.ball.id] = ballMesh;
-  }
   refreshPovSelect();
 }
 
@@ -761,28 +786,22 @@ function refreshPovSelect(){
   const sel = document.getElementById('povSelect');
   if(!sel) return;
   sel.innerHTML = '';
-  players.forEach(p=>{
+  entities.filter(e=>e.team!=='ball').forEach(e=>{
     const opt = document.createElement('option');
-    opt.value = p.id;
-    opt.textContent = `${p.team==='blue'?'Azul':'Vermelho'} #${p.number}${p.name?' · '+p.name:''}`;
+    opt.value = e.id;
+    opt.textContent = `${e.team==='blue'?'Azul':'Vermelho'} #${e.number}${e.name?' · '+e.name:''}`;
     sel.appendChild(opt);
   });
-  if(three && (three.povId==null || !players.find(p=>p.id===three.povId))){
-    three.povId = players.length ? players[0].id : null;
-    sel.value = three.povId;
+  if(three && (three.povId==null || !entities.find(e=>e.id===three.povId && e.team!=='ball'))){
+    const first = entities.find(e=>e.team!=='ball');
+    three.povId = first ? first.id : null;
+    if(three.povId!=null) sel.value = three.povId;
   }
 }
-document.getElementById('povSelect').addEventListener('change', (e)=>{
-  three.povId = parseInt(e.target.value);
-  selectedId = three.povId;
-  startCameraTransition();
-  updatePovWarn();
-});
-function updatePovWarn(){
-  const warn = document.getElementById('povWarn');
-  const p = players.find(pl=>pl.id===three.povId);
-  const tr = three.snapshot && three.snapshot.players.find(x=>x.id===three.povId);
-  warn.textContent = (tr && !tr.path) ? '(sem trajeto gravado — ficará parado)' : '';
+
+function startCameraTransition(){
+  if(!three) return;
+  three.transition = {t0: performance.now(), fromPos: three.camera.position.clone(), fromQuat: three.camera.quaternion.clone()};
 }
 
 function animate3D(){
@@ -791,7 +810,7 @@ function animate3D(){
   const now = performance.now();
   const dt = Math.min((now-three.lastFrame)/1000, 0.05);
   three.lastFrame = now;
-  const dur = duration3D(three.snapshot);
+  const dur = totalDuration();
   if(three.playing){
     three.t += dt*three.speed;
     if(three.t>dur){ three.t = dur; three.playing = false; document.getElementById('play3DBtn').textContent = '▶ Reproduzir'; }
@@ -799,82 +818,70 @@ function animate3D(){
   }
   const tt = three.t;
 
-  const all = [...three.snapshot.players, ...(three.snapshot.ball?[three.snapshot.ball]:[])];
-  all.forEach(tr=>{
-    const pos = sample3D(tr, tt);
-    const mesh = three.meshes[tr.id];
-    mesh.position.copy(pos);
-    if(tr.team!=='ball'){
-      const v = velocity3D(tr, tt);
+  three.snap.entities.forEach(e=>{
+    const s = sample3D(e.id, tt);
+    if(!s) return;
+    const mesh = three.meshes[e.id];
+    mesh.position.copy(s.pos);
+    if(e.team!=='ball'){
+      const v = velocity3D(e.id, tt);
       const spd = v.length();
-      if(spd>0.3) mesh.rotation.y = Math.atan2(v.x, v.z);
-      else mesh.rotation.y = Math.atan2(tr.facingDir.x, tr.facingDir.z);
-
-      // corrida: pernas e braços balançando, cadência e amplitude ligadas à velocidade
+      // corpo aponta pra direção do movimento; se parado, usa o ângulo definido na prancha
+      mesh.rotation.y = spd>0.3 ? Math.atan2(v.x, v.z) : s.facingAngle;
       const rig = mesh.userData.rig;
       if(rig){
         const spdFrac = Math.min(spd/7.5, 1);
         const freq = 1.6 + spdFrac*4.2;
         const amp = 0.12 + spdFrac*0.62;
-        const phase = tt*freq*Math.PI*2 + (tr.id*1.7);
+        const phase = tt*freq*Math.PI*2 + (e.id*1.7);
         const swing = Math.sin(phase);
         rig.legs[0].rotation.x = swing*amp;
         rig.legs[1].rotation.x = -swing*amp;
         rig.arms[0].rotation.x = -swing*amp*0.75;
         rig.arms[1].rotation.x = swing*amp*0.75;
-        // leve inclinação do tronco pra frente conforme acelera, e um bounce de passada
         rig.torsoPivot.rotation.x = spdFrac*0.22;
         mesh.position.y += Math.abs(Math.cos(phase))*spdFrac*0.035;
       }
     }
   });
 
-  let povTr = three.snapshot.players.find(x=>x.id===three.povId);
-  if(!povTr && three.snapshot.players.length){
-    three.povId = three.snapshot.players[0].id;
-    povTr = three.snapshot.players[0];
-  }
-
-  if(povTr){
-    const posA = sample3D(povTr, tt);
-    const velA = velocity3D(povTr, tt);
-    const speedA = Math.min(velA.length(), 9);
+  const povEntity = three.snap.entities.find(e=>e.id===three.povId);
+  if(povEntity){
+    const s = sample3D(povEntity.id, tt);
+    const v = velocity3D(povEntity.id, tt);
+    const speedA = Math.min(v.length(), 9);
     const eyeHeight = 1.68;
-    const basePos = posA.clone(); basePos.y = eyeHeight;
+    const basePos = s.pos.clone(); basePos.y = eyeHeight;
 
-    // balanço de corrida — uma única fase, suave, sem ruído de alta frequência
     const spdFrac = Math.min(speedA/7.5, 1);
-    const bobFreq = 1.6 + spdFrac*1.8;           // cadência sobe com a velocidade
+    const bobFreq = 1.6 + spdFrac*1.8;
     const phase = tt*bobFreq*Math.PI*2 + three.shakeSeed;
-    const bobAmt = 0.02 + spdFrac*0.05;           // balanço vertical, discreto
-    const swayAmt = 0.008 + spdFrac*0.02;         // balanço lateral, discreto
+    const bobAmt = 0.02 + spdFrac*0.05;
+    const swayAmt = 0.008 + spdFrac*0.02;
     basePos.y += Math.sin(phase)*bobAmt;
     basePos.x += Math.cos(phase*0.5)*swayAmt;
 
     three.camera.position.copy(basePos);
 
-    let dir = velA.clone();
-    if(dir.length()<0.3) dir = povTr.facingDir.clone();
-    dir.normalize();
-    // olhar mais baixo em alta velocidade (conduzindo a bola), mais alto parado/lento
-    const pitch = -0.03 - Math.min(speedA,6)*0.03;
+    // a direção do olhar SEMPRE segue o ângulo definido na prancha (interpolado
+    // entre as etapas) — não é mais sobrescrita pela direção do movimento.
+    const dir = new THREE.Vector3(Math.sin(s.facingAngle), 0, Math.cos(s.facingAngle));
+    const pitch = -0.03 - Math.min(speedA,6)*0.02;
     const target = basePos.clone().add(dir.multiplyScalar(5));
     target.y = basePos.y + Math.tan(pitch)*5;
     three.camera.up.set(0,1,0);
     three.camera.lookAt(target);
-    // leve rolagem, quase imperceptível, só pra não parecer travado num trilho
     three.camera.rotation.z += Math.sin(phase)*0.006*spdFrac;
 
-    three.snapshot.players.forEach(tr=>{
-      if(three.meshes[tr.id]) three.meshes[tr.id].visible = (tr.id!==povTr.id);
+    three.snap.entities.forEach(e=>{
+      if(three.meshes[e.id]) three.meshes[e.id].visible = (e.id!==povEntity.id);
     });
   }
 
-  // transição suave da câmera ao trocar de jogador ou de modo de visão
   if(three.transition){
     const elapsed = performance.now() - three.transition.t0;
-    const dur = 380;
-    const f = Math.min(1, elapsed/dur);
+    const fDur = 380;
+    const f = Math.min(1, elapsed/fDur);
     const fe = f*f*(3-2*f);
     const targetPos = three.camera.position.clone();
     const targetQuat = three.camera.quaternion.clone();
@@ -886,26 +893,18 @@ function animate3D(){
   three.renderer.render(three.scene, three.camera);
 }
 
-function startCameraTransition(){
-  if(!three) return;
-  three.transition = {t0: performance.now(), fromPos: three.camera.position.clone(), fromQuat: three.camera.quaternion.clone()};
-}
-
 document.getElementById('goto3D').onclick = ()=>{
   document.getElementById('editorScreen').style.display = 'none';
   document.getElementById('viewer3D').style.display = 'flex';
   if(!three) initThree();
   rebuild3DScene();
-  // usa o jogador selecionado (amarelo) na prancha como visão inicial, se houver
-  if(selectedId!=null && players.find(p=>p.id===selectedId)){
+  if(selectedId!=null && entities.find(e=>e.id===selectedId && e.team!=='ball')){
     three.povId = selectedId;
     document.getElementById('povSelect').value = selectedId;
   }
   three.transition = null;
-  document.getElementById('viewBadge').textContent = 'PRIMEIRA PESSOA';
   three.t = 0; three.playing = true;
   document.getElementById('play3DBtn').textContent = '⏸ Pausar';
-  updatePovWarn();
   requestAnimationFrame(animate3D);
 };
 document.getElementById('backTo2D').onclick = ()=>{
@@ -915,28 +914,13 @@ document.getElementById('backTo2D').onclick = ()=>{
   document.getElementById('editorScreen').style.display = 'flex';
   layoutCanvas();
 };
-document.getElementById('bgPhotoBtn').onclick = ()=>{
-  document.getElementById('bgPhotoInput').click();
-};
-document.getElementById('bgPhotoInput').addEventListener('change', (ev)=>{
-  const file = ev.target.files[0];
-  if(!file || !three) return;
-  const reader = new FileReader();
-  reader.onload = (e)=>{
-    const img = new Image();
-    img.onload = ()=>{
-      const tex = new THREE.Texture(img);
-      tex.needsUpdate = true;
-      three.scene.background = tex;
-      // some fog exagerado pra foto real aparecer melhor
-      three.scene.fog = new THREE.Fog(0x1b1b1b, 55, 140);
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
+document.getElementById('povSelect').addEventListener('change', (e)=>{
+  three.povId = parseInt(e.target.value);
+  selectedId = three.povId;
+  startCameraTransition();
 });
 document.getElementById('play3DBtn').onclick = ()=>{
-  if(three.t>=duration3D(three.snapshot)){ three.t = 0; }
+  if(three.t>=totalDuration()){ three.t = 0; }
   three.playing = !three.playing;
   document.getElementById('play3DBtn').textContent = three.playing ? '⏸ Pausar' : '▶ Reproduzir';
 };
@@ -948,7 +932,7 @@ document.getElementById('stop3DBtn').onclick = ()=>{
 document.getElementById('scrub3D').addEventListener('input', (e)=>{
   three.playing = false;
   document.getElementById('play3DBtn').textContent = '▶ Reproduzir';
-  const dur = duration3D(three.snapshot);
+  const dur = totalDuration();
   three.t = (e.target.value/1000)*dur;
 });
 document.querySelectorAll('#viewer3D #bottombar button[data-spd3d]').forEach(b=>{
@@ -958,6 +942,27 @@ document.querySelectorAll('#viewer3D #bottombar button[data-spd3d]').forEach(b=>
     three.speed = parseFloat(b.dataset.spd3d);
   });
 });
+
+function wireBackdropUpload(btnId, inputId, key){
+  document.getElementById(btnId).onclick = ()=> document.getElementById(inputId).click();
+  document.getElementById(inputId).addEventListener('change', (ev)=>{
+    const file = ev.target.files[0];
+    if(!file || !three) return;
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        const tex = new THREE.Texture(img);
+        tex.needsUpdate = true;
+        three.backdrops[key].forEach(mat=>{ mat.map = tex; mat.color.set(0xffffff); mat.needsUpdate = true; });
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+wireBackdropUpload('bgGoalBtn','bgGoalInput','goal');
+wireBackdropUpload('bgStandBtn','bgStandInput','stand');
 </script>
 </body>
 </html>
