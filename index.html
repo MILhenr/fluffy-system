@@ -6,7 +6,7 @@
 <style>
   html,body{margin:0;padding:0;background:#0a0a0a;color:#eee;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;height:100%;overflow:hidden;}
   #app{display:flex;flex-direction:column;height:100vh;width:100vw;}
-  #toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px 14px;background:#151515;border-bottom:1px solid #262626;}
+  #toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:8px 14px;background:#151515;border-bottom:1px solid #262626;}
   .iconbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:#202020;border:1px solid #333;color:#eee;width:66px;height:60px;border-radius:14px;cursor:pointer;font-size:11.5px;line-height:1;flex-shrink:0;}
   .iconbtn .ic{font-size:23px;line-height:1;}
   .iconbtn:hover{background:#2a2a2a;}
@@ -17,18 +17,18 @@
   #toolbar button.txt:hover{background:#2a2a2a;}
   #toolbar button.txt.primary{background:#2c4270;border-color:#3d5a95;}
   #toolbar .sep{width:1px;height:40px;background:#2c2c2c;margin:0 2px;}
-  #stepbar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:#101010;border-bottom:1px solid #262626;}
+  #stepbar{display:flex;align-items:center;gap:10px;padding:6px 14px;background:#101010;border-bottom:1px solid #262626;}
   #stepbar button.txt{background:#202020;border:1px solid #333;color:#eee;padding:10px 14px;border-radius:12px;font-size:15px;cursor:pointer;}
   #stepLabel{font-size:14px;color:#ddd;min-width:70px;text-align:center;font-weight:600;}
   #stepSlider{flex:1;accent-color:#e0b84a;}
   #stage{flex:1;position:relative;overflow:hidden;background:#0a0a0a;display:flex;align-items:center;justify-content:center;}
   #courtCanvas{touch-action:none;cursor:default;}
-  #bottombar{display:flex;gap:8px;align-items:center;padding:10px 14px;background:#151515;border-top:1px solid #262626;flex-wrap:wrap;}
+  #bottombar{display:flex;gap:8px;align-items:center;padding:8px 14px;background:#151515;border-top:1px solid #262626;flex-wrap:wrap;}
   #bottombar button.txt{background:#202020;border:1px solid #333;color:#eee;padding:10px 14px;border-radius:12px;font-size:14px;cursor:pointer;}
   #bottombar button.txt:hover{background:#2a2a2a;}
   #bottombar button.txt.primary{background:#2c4270;border-color:#3d5a95;}
   #scrub{flex:1;min-width:80px;accent-color:#8899cc;}
-  .hint{font-size:11.5px;color:#777;padding:0 14px 8px;background:#151515;}
+  .hint{font-size:10.5px;color:#777;padding:0 14px 5px;background:#151515;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .editPop{position:absolute;background:#1e1e1e;border:1px solid #444;border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:6px;z-index:20;box-shadow:0 4px 18px rgba(0,0,0,.5);}
   .editPop input{background:#111;border:1px solid #3a3a3a;color:#eee;padding:5px 7px;border-radius:5px;font-size:13px;width:120px;}
   .editPop .row{display:flex;gap:6px;}
@@ -52,7 +52,7 @@
       <button id="addRed" class="iconbtn"><span class="ic">🔴</span>Vermelho</button>
       <button id="addBall" class="iconbtn"><span class="ic">⚽</span>Bola</button>
       <div class="sep"></div>
-      <button id="clearAll" class="iconbtn warn"><span class="ic">🗂️</span>Nova</button>
+      <button id="play2DTop" class="iconbtn"><span class="ic">▶️</span>2D</button>
       <div class="sep"></div>
       <button id="saveBtn" class="iconbtn primary"><span class="ic">💾</span>Salvar</button>
       <button id="goto3D" class="iconbtn primary"><span class="ic">🎬</span>Ver 3D</button>
@@ -63,8 +63,10 @@
       <button id="stepDel" class="txt">➖ Remover</button>
       <span id="stepLabel">Etapa 1/1</span>
       <input type="range" id="stepSlider" min="0" max="0" step="1" value="0">
+      <button id="clearAll" class="iconbtn warn" style="width:44px;height:44px;flex-shrink:0;"><span class="ic" style="font-size:16px;">🗂️</span></button>
     </div>
-    <div class="hint">Arraste o jogador = posição dele NESTA etapa · toque nele = seleciona (fica amarelo) e vira a visão do 3D · arraste a bolinha branca = direção do olhar nesta etapa · "➕ Nova etapa" captura a posição atual e cria o próximo passo da jogada</div>
+    <div class="hint">Arraste = posição nesta etapa · toque = seleciona (amarelo, vira a visão do 3D) · bolinha branca = direção do olhar · "➕" cria o próximo passo · "▶️ 2D" pré-visualiza tudo antes do 3D</div>
+
     <div id="stage">
       <canvas id="courtCanvas"></canvas>
     </div>
@@ -134,15 +136,15 @@ const stage = document.getElementById('stage');
 let court = {x:0,y:0,w:0,h:0};
 
 function layoutCanvas(){
-  const availW = stage.clientWidth - 20;
-  const availH = stage.clientHeight - 20;
+  const availW = stage.clientWidth - 8;
+  const availH = stage.clientHeight - 8;
   const aspect = 0.52;
   let h = availH, w = h*aspect;
   if(w>availW){ w = availW; h = w/aspect; }
   canvas.width = w; canvas.height = h;
   canvas.style.width = w+'px'; canvas.style.height = h+'px';
-  const pad = h*0.06;
-  court = {x: w*0.06, y: pad*1.4, w: w*0.88, h: h - pad*2.8};
+  const pad = h*0.028;
+  court = {x: w*0.03, y: pad*1.2, w: w*0.94, h: h - pad*2.4};
   draw();
 }
 function toPx(fx, fy){ return { x: court.x + fx*court.w, y: court.y + fy*court.h }; }
@@ -535,6 +537,7 @@ document.getElementById('playBtn').onclick = ()=>{
   document.getElementById('playBtn').textContent = '⏸ Pausar';
   playLoop2D();
 };
+document.getElementById('play2DTop').onclick = ()=>{ document.getElementById('playBtn').click(); };
 document.getElementById('stopBtn').onclick = ()=>{
   playing2D = false; document.getElementById('playBtn').textContent='▶ Reproduzir tudo';
   document.getElementById('scrub').value = 0; draw();
@@ -854,10 +857,10 @@ function animate3D(){
     const basePos = s.pos.clone(); basePos.y = eyeHeight;
 
     const spdFrac = Math.min(speedA/7.5, 1);
-    const bobFreq = 1.6 + spdFrac*1.8;
+    const bobFreq = 1.8 + spdFrac*2.2;
     const phase = tt*bobFreq*Math.PI*2 + three.shakeSeed;
-    const bobAmt = 0.02 + spdFrac*0.05;
-    const swayAmt = 0.008 + spdFrac*0.02;
+    const bobAmt = 0.03 + spdFrac*0.10;
+    const swayAmt = 0.012 + spdFrac*0.038;
     basePos.y += Math.sin(phase)*bobAmt;
     basePos.x += Math.cos(phase*0.5)*swayAmt;
 
@@ -866,7 +869,7 @@ function animate3D(){
     // a direção do olhar SEMPRE segue o ângulo definido na prancha (interpolado
     // entre as etapas) — não é mais sobrescrita pela direção do movimento.
     const dir = new THREE.Vector3(Math.sin(s.facingAngle), 0, Math.cos(s.facingAngle));
-    const pitch = -0.03 - Math.min(speedA,6)*0.02;
+    const pitch = -0.03 - Math.min(speedA,6)*0.032;
     const target = basePos.clone().add(dir.multiplyScalar(5));
     target.y = basePos.y + Math.tan(pitch)*5;
     three.camera.up.set(0,1,0);
