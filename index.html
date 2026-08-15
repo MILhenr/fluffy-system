@@ -6,9 +6,9 @@
 <style>
   html,body{margin:0;padding:0;background:#0a0a0a;color:#eee;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;height:100%;overflow:hidden;}
   #app{display:flex;flex-direction:column;height:100vh;width:100vw;}
-  #toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:8px 14px;background:#151515;border-bottom:1px solid #262626;}
-  .iconbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:#202020;border:1px solid #333;color:#eee;width:66px;height:60px;border-radius:14px;cursor:pointer;font-size:11.5px;line-height:1;flex-shrink:0;}
-  .iconbtn .ic{font-size:23px;line-height:1;}
+  #toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:5px 12px;background:#151515;border-bottom:1px solid #262626;}
+  .iconbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:#202020;border:1px solid #333;color:#eee;width:58px;height:50px;border-radius:12px;cursor:pointer;font-size:10.5px;line-height:1;flex-shrink:0;}
+  .iconbtn .ic{font-size:20px;line-height:1;}
   .iconbtn:hover{background:#2a2a2a;}
   .iconbtn:disabled{opacity:.3;cursor:default;}
   .iconbtn.primary{background:#2c4270;border-color:#3d5a95;}
@@ -17,13 +17,13 @@
   #toolbar button.txt:hover{background:#2a2a2a;}
   #toolbar button.txt.primary{background:#2c4270;border-color:#3d5a95;}
   #toolbar .sep{width:1px;height:40px;background:#2c2c2c;margin:0 2px;}
-  #stepbar{display:flex;align-items:center;gap:10px;padding:6px 14px;background:#101010;border-bottom:1px solid #262626;}
-  #stepbar button.txt{background:#202020;border:1px solid #333;color:#eee;padding:10px 14px;border-radius:12px;font-size:15px;cursor:pointer;}
-  #stepLabel{font-size:14px;color:#ddd;min-width:70px;text-align:center;font-weight:600;}
+  #stepbar{display:flex;align-items:center;gap:8px;padding:4px 12px;background:#101010;border-bottom:1px solid #262626;}
+  #stepbar button.txt{background:#202020;border:1px solid #333;color:#eee;padding:7px 12px;border-radius:10px;font-size:13px;cursor:pointer;}
+  #stepLabel{font-size:13px;color:#ddd;min-width:64px;text-align:center;font-weight:600;}
   #stepSlider{flex:1;accent-color:#e0b84a;}
   #stage{flex:1;position:relative;overflow:hidden;background:#0a0a0a;display:flex;align-items:center;justify-content:center;}
   #courtCanvas{touch-action:none;cursor:default;}
-  #bottombar{display:flex;gap:8px;align-items:center;padding:8px 14px;background:#151515;border-top:1px solid #262626;flex-wrap:wrap;}
+  #bottombar{display:flex;gap:8px;align-items:center;padding:5px 12px;background:#151515;border-top:1px solid #262626;flex-wrap:wrap;}
   #bottombar button.txt{background:#202020;border:1px solid #333;color:#eee;padding:10px 14px;border-radius:12px;font-size:14px;cursor:pointer;}
   #bottombar button.txt:hover{background:#2a2a2a;}
   #bottombar button.txt.primary{background:#2c4270;border-color:#3d5a95;}
@@ -65,7 +65,6 @@
       <input type="range" id="stepSlider" min="0" max="0" step="1" value="0">
       <button id="clearAll" class="iconbtn warn" style="width:44px;height:44px;flex-shrink:0;"><span class="ic" style="font-size:16px;">🗂️</span></button>
     </div>
-    <div class="hint">Arraste = posição nesta etapa · toque = seleciona (amarelo, vira a visão do 3D) · bolinha branca = direção do olhar · "➕" cria o próximo passo · "▶️ 2D" pré-visualiza tudo antes do 3D</div>
 
     <div id="stage">
       <canvas id="courtCanvas"></canvas>
@@ -74,9 +73,6 @@
       <button id="playBtn" class="txt">▶ Reproduzir tudo</button>
       <button id="stopBtn" class="txt">⏹ Parar</button>
       <input type="range" id="scrub" min="0" max="1000" value="0">
-      <button class="txt" data-spd="0.5">0.5x</button>
-      <button class="txt primary" data-spd="1">1x</button>
-      <button class="txt" data-spd="1.5">1.5x</button>
       <button id="delBtn" class="txt">🗑 Excluir</button>
     </div>
   </div>
@@ -136,15 +132,15 @@ const stage = document.getElementById('stage');
 let court = {x:0,y:0,w:0,h:0};
 
 function layoutCanvas(){
-  const availW = stage.clientWidth - 8;
-  const availH = stage.clientHeight - 8;
+  const availW = stage.clientWidth - 4;
+  const availH = stage.clientHeight - 4;
   const aspect = 0.52;
   let h = availH, w = h*aspect;
   if(w>availW){ w = availW; h = w/aspect; }
   canvas.width = w; canvas.height = h;
   canvas.style.width = w+'px'; canvas.style.height = h+'px';
-  const pad = h*0.028;
-  court = {x: w*0.03, y: pad*1.2, w: w*0.94, h: h - pad*2.4};
+  const pad = h*0.014;
+  court = {x: w*0.015, y: pad*1.1, w: w*0.97, h: h - pad*2.2};
   draw();
 }
 function toPx(fx, fy){ return { x: court.x + fx*court.w, y: court.y + fy*court.h }; }
