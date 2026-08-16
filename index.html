@@ -355,6 +355,19 @@ canvas.addEventListener('pointerdown', (ev)=>{
   if(playing2D) return;
   const p = pointerPos(ev);
 
+  // toque em cima de uma peça (jogador ou bola) sempre tem prioridade
+  const hit = hitTest(p.x,p.y);
+  if(hit){
+    selectedId = hit.id; dragging = hit;
+    canvas.setPointerCapture(ev.pointerId);
+    const now = performance.now();
+    if(lastTapInfo.id===hit.id && now-lastTapInfo.time < 350){ openEditPopup(hit); dragging = null; }
+    lastTapInfo = {id:hit.id, time:now};
+    draw();
+    return;
+  }
+
+  // só testa a alça de direção se o toque não caiu em cima de nenhuma peça
   if(selectedId!=null){
     const sel = entities.find(e=>e.id===selectedId);
     if(sel && sel.team!=='ball' && steps[currentStep].positions[sel.id]){
@@ -367,14 +380,7 @@ canvas.addEventListener('pointerdown', (ev)=>{
     }
   }
 
-  const hit = hitTest(p.x,p.y);
-  if(hit){
-    selectedId = hit.id; dragging = hit;
-    canvas.setPointerCapture(ev.pointerId);
-    const now = performance.now();
-    if(lastTapInfo.id===hit.id && now-lastTapInfo.time < 350){ openEditPopup(hit); dragging = null; }
-    lastTapInfo = {id:hit.id, time:now};
-  } else selectedId = null;
+  selectedId = null;
   draw();
 });
 canvas.addEventListener('pointermove', (ev)=>{
