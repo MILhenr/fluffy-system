@@ -88,6 +88,8 @@
       <span style="font-size:13.5px;color:#999;">Visão do jogador:</span>
       <select id="povSelect"></select>
       <div class="sep"></div>
+      <button id="editTopBtn" class="txt primary">📐 Editar de cima</button>
+      <div class="sep"></div>
       <button id="bgGoalBtn" class="txt">🥅 Fundo do gol</button>
       <input type="file" id="bgGoalInput" accept="image/*" style="display:none">
       <button id="bgStandBtn" class="txt">🏟️ Fundo da arquibancada</button>
@@ -95,10 +97,18 @@
       <button id="bgRoofBtn" class="txt">🏛️ Fundo do teto</button>
       <input type="file" id="bgRoofInput" accept="image/*" style="display:none">
     </div>
+    <div id="editStepBar" style="display:none;align-items:center;gap:10px;padding:8px 14px;background:#101010;border-bottom:1px solid #262626;">
+      <button id="editStepPrev" class="txt">◀</button>
+      <button id="editStepAdd" class="txt" style="background:#274a30;border-color:#3a7048;">➕ Nova etapa</button>
+      <button id="editStepDel" class="txt" style="background:#4a2a2a;border-color:#6a3a3a;">➖ Remover</button>
+      <span id="editStepLabel" style="font-size:14px;color:#ddd;font-weight:600;">Etapa 1/1</span>
+      <button id="editStepNext" class="txt">▶</button>
+      <span style="font-size:11px;color:#888;margin-left:auto;">arraste os jogadores/bola pra reposicionar</span>
+    </div>
     <div id="v3dCanvasWrap">
       <div class="hud">
         <div class="badge">RECONSTRUÇÃO 3D · gerada a partir da prancha tática</div>
-        <div class="badge">PRIMEIRA PESSOA</div>
+        <div class="badge" id="viewer3DModeBadge">PRIMEIRA PESSOA</div>
       </div>
     </div>
     <div id="bottombar" style="flex-direction:column;align-items:stretch;gap:8px;">
@@ -129,6 +139,9 @@
    ========================================================================= */
 const COURT_LEN = 52, COURT_WID = 24;
 const MIN_SPEED = 1.4, MAX_SPEED = 7.5, MIN_STEP_DURATION = 0.55;
+const BALL_SPEED = 9.5; // m/s constante — a bola sempre viaja nessa velocidade,
+                         // nunca fica mais lenta só porque um jogador correu
+                         // muito no mesmo intervalo.
 
 let entities = [];               // {id, team:'blue'|'red'|'ball', number, name}
 let steps = [ {positions:{}} ];  // {positions:{ [id]: {x,y,facingAngle} }}
@@ -196,21 +209,30 @@ function lerpAngle(a,b,u){
 }
 
 // posição/ângulo de uma entidade num instante t (segundos) ao longo de TODAS as etapas
+function entityStepDist(i, id){
+  const a = steps[i].positions[id], b = steps[i+1].positions[id];
+  if(!a||!b) return 0;
+  const dx=(b.x-a.x)*COURT_WID, dy=(b.y-a.y)*COURT_LEN;
+  return Math.hypot(dx,dy);
+}
 function segmentDuration(i){
+  const ballEnt = entities.find(e=>e.team==='ball');
   let maxLen = 0;
   entities.forEach(e=>{
-    const a = steps[i].positions[e.id], b = steps[i+1].positions[e.id];
-    if(!a||!b) return;
-    const dx=(b.x-a.x)*COURT_WID, dy=(b.y-a.y)*COURT_LEN;
-    maxLen = Math.max(maxLen, Math.hypot(dx,dy));
+    if(ballEnt && e.id===ballEnt.id) return; // a bola não dita o ritmo do segmento
+    maxLen = Math.max(maxLen, entityStepDist(i, e.id));
   });
-  if(maxLen<0.06) return MIN_STEP_DURATION;
-  return Math.max(maxLen/MAX_SPEED, MIN_STEP_DURATION);
+  let dur = maxLen<0.06 ? MIN_STEP_DURATION : Math.max(maxLen/MAX_SPEED, MIN_STEP_DURATION);
+  if(ballEnt){
+    const ballLen = entityStepDist(i, ballEnt.id);
+    if(ballLen>0.02) dur = Math.max(dur, ballLen/BALL_SPEED);
+  }
+  return dur;
 }
 function allDurations(){ const d=[]; for(let i=0;i<steps.length-1;i++) d.push(segmentDuration(i)); return d; }
 function totalDuration(durs){ durs = durs || allDurations(); return durs.reduce((a,b)=>a+b,0) || 0.01; }
 
-function sampleEntityAt(id, t, durs){
+function sampleEntityAt(id, t, durs, isBall){
   if(steps.length===1 || !steps[0].positions[id]) return steps[currentStep].positions[id] || null;
   if(!durs) durs = allDurations();
   let acc = 0;
@@ -221,7 +243,17 @@ function sampleEntityAt(id, t, durs){
       if(!a && !b) { acc+=dur; continue; }
       if(!a) return b;
       if(!b) return a;
-      const u = dur>0 ? Math.max(0,Math.min(1,(t-acc)/dur)) : 1;
+      let u;
+      if(isBall){
+        // a bola percorre sua distância na velocidade constante dela; se o
+        // segmento for mais longo (porque um jogador demorou mais), ela chega
+        // no destino antes e só espera lá — nunca "arrasta" mais devagar.
+        const L = entityStepDist(i, id);
+        const travel = L>0.02 ? L/BALL_SPEED : 0;
+        u = travel>0 ? Math.max(0,Math.min(1,(t-acc)/travel)) : 1;
+      } else {
+        u = dur>0 ? Math.max(0,Math.min(1,(t-acc)/dur)) : 1;
+      }
       const ue = u*u*(3-2*u);
       return { x:a.x+(b.x-a.x)*ue, y:a.y+(b.y-a.y)*ue, facingAngle: lerpAngle(a.facingAngle||0, b.facingAngle||0, ue) };
     }
@@ -580,7 +612,7 @@ function playLoop2D(){
   document.getElementById('scrub').value = Math.round(t/dur*1000);
   drawCourt();
   entities.forEach(e=>{
-    const pos = sampleEntityAt(e.id, t, durs);
+    const pos = sampleEntityAt(e.id, t, durs, e.team==='ball');
     drawEntityAt(e, pos, true);
   });
   if(elapsed>=dur){ playing2D=false; document.getElementById('playBtn').textContent='▶ Reproduzir tudo'; return; }
@@ -603,7 +635,7 @@ document.getElementById('scrub').addEventListener('input', (e)=>{
   const dur = totalDuration();
   const t = (e.target.value/1000)*dur;
   drawCourt();
-  entities.forEach(en=>{ const pos = sampleEntityAt(en.id, t); drawEntityAt(en, pos, true); });
+  entities.forEach(en=>{ const pos = sampleEntityAt(en.id, t, null, en.team==='ball'); drawEntityAt(en, pos, true); });
 });
 document.querySelectorAll('#editorScreen #bottombar button[data-spd]').forEach(b=>{
   b.addEventListener('click', ()=>{
@@ -625,19 +657,22 @@ let three = null;
 function toWorld(fx, fy){
   return new THREE.Vector3((fy-0.5)*COURT_LEN, 0, -(fx-0.5)*COURT_WID);
 }
+function fromWorld(v){
+  return { x: -(v.z/COURT_WID)+0.5, y: (v.x/COURT_LEN)+0.5 };
+}
 
 function buildSnapshot(){
   return {
     entities: entities.map(e=>({id:e.id, team:e.team, number:e.number, name:e.name}))
   };
 }
-function sample3D(id, t, durs){
-  const p = sampleEntityAt(id, t, durs);
+function sample3D(id, t, durs, isBall){
+  const p = sampleEntityAt(id, t, durs, isBall);
   if(!p) return null;
   return { pos: toWorld(p.x,p.y), facingAngle: p.facingAngle ?? -Math.PI/2 };
 }
-function velocity3D(id, t, dt=0.05, durs){
-  const a = sample3D(id, Math.max(0,t-dt), durs), b = sample3D(id, t+dt, durs);
+function velocity3D(id, t, dt=0.05, durs, isBall){
+  const a = sample3D(id, Math.max(0,t-dt), durs, isBall), b = sample3D(id, t+dt, durs, isBall);
   if(!a||!b) return new THREE.Vector3();
   return b.pos.clone().sub(a.pos).multiplyScalar(1/(2*dt));
 }
@@ -784,22 +819,68 @@ function initThree(){
   });
   renderer.domElement.style.touchAction = 'none';
 
-  // ---- olhar livre: arraste na tela pra virar a cabeça, 360°, mesmo durante a reprodução ----
+  const raycaster = new THREE.Raycaster();
+  const groundPlane = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
+  function pointerToNDC(ev){
+    const rect = renderer.domElement.getBoundingClientRect();
+    return new THREE.Vector2(
+      ((ev.clientX-rect.left)/rect.width)*2-1,
+      -((ev.clientY-rect.top)/rect.height)*2+1
+    );
+  }
+  function groundHit(ev){
+    raycaster.setFromCamera(pointerToNDC(ev), three.camera);
+    const pt = new THREE.Vector3();
+    return raycaster.ray.intersectPlane(groundPlane, pt) ? pt : null;
+  }
+  function nearestEntityAtWorld(pt){
+    let best=null, bestD=1.3; // até 1.3m de tolerância
+    entities.forEach(e=>{
+      const pos = steps[currentStep].positions[e.id];
+      if(!pos) return;
+      const w = toWorld(pos.x,pos.y);
+      const d = Math.hypot(w.x-pt.x, w.z-pt.z);
+      if(d<bestD){ bestD=d; best=e; }
+    });
+    return best;
+  }
+
+  // ---- olhar livre (1ª pessoa) OU arrastar jogadores (modo editar de cima) ----
   let lookDrag = null;
+  let dragEntity = null;
   renderer.domElement.addEventListener('pointerdown', (ev)=>{
+    if(three && three.editMode){
+      const pt = groundHit(ev);
+      dragEntity = pt ? nearestEntityAtWorld(pt) : null;
+      renderer.domElement.setPointerCapture(ev.pointerId);
+      return;
+    }
     lookDrag = {x: ev.clientX, y: ev.clientY};
     renderer.domElement.setPointerCapture(ev.pointerId);
   });
   renderer.domElement.addEventListener('pointermove', (ev)=>{
-    if(!lookDrag || !three) return;
+    if(!three) return;
+    if(three.editMode){
+      if(!dragEntity) return;
+      const pt = groundHit(ev);
+      if(!pt) return;
+      const f = fromWorld(pt);
+      f.x = Math.max(-0.03, Math.min(1.03, f.x));
+      f.y = Math.max(-0.03, Math.min(1.03, f.y));
+      const pos = steps[currentStep].positions[dragEntity.id];
+      pos.x = f.x; pos.y = f.y;
+      recomputeAutoFacing(currentStep);
+      return;
+    }
+    if(!lookDrag) return;
     const dx = ev.clientX - lookDrag.x, dy = ev.clientY - lookDrag.y;
     lookDrag = {x: ev.clientX, y: ev.clientY};
     const sens = 0.0065;
     three.freeLookYaw = (three.freeLookYaw||0) - dx*sens;
     three.freeLookPitch = Math.max(-1.3, Math.min(1.3, (three.freeLookPitch||0) - dy*sens));
   });
-  renderer.domElement.addEventListener('pointerup', ()=>{ lookDrag = null; });
-  renderer.domElement.addEventListener('pointercancel', ()=>{ lookDrag = null; });
+  renderer.domElement.addEventListener('pointerup', ()=>{ lookDrag = null; dragEntity = null; });
+  renderer.domElement.addEventListener('pointercancel', ()=>{ lookDrag = null; dragEntity = null; });
 
   const camera = new THREE.PerspectiveCamera(72, wrap.clientWidth/wrap.clientHeight, 0.05, 300);
 
@@ -908,7 +989,7 @@ function initThree(){
   three = {
     scene, renderer, camera, wrap, meshes:{}, t:0, playing:true, speed:1,
     shakeSeed:Math.random()*1000, povId:null, lastFrame:performance.now(),
-    freeLookYaw:0, freeLookPitch:0,
+    freeLookYaw:0, freeLookPitch:0, editMode:false,
     backdrops:{ goal:goalBackdrops, stand:standBackdrops, roof:roofBackdrop },
     transition:null
   };
@@ -963,10 +1044,46 @@ function startCameraTransition(){
   three.transition = {t0: performance.now(), fromPos: three.camera.position.clone(), fromQuat: three.camera.quaternion.clone()};
 }
 
+function stepStartTime(idx, durs){
+  durs = durs || allDurations();
+  let acc=0;
+  for(let i=0;i<idx && i<durs.length;i++) acc+=durs[i];
+  return acc;
+}
+
+function renderEditFrame(){
+  three.snap.entities.forEach(e=>{
+    const pos = steps[currentStep].positions[e.id];
+    if(!pos) return;
+    const mesh = three.meshes[e.id];
+    if(!mesh) return;
+    mesh.visible = true;
+    mesh.position.copy(toWorld(pos.x, pos.y));
+    if(e.team!=='ball'){
+      mesh.rotation.y = pos.facingAngle ?? -Math.PI/2;
+      const rig = mesh.userData.rig;
+      if(rig){
+        rig.legs[0].rotation.x = 0; rig.legs[1].rotation.x = 0;
+        rig.arms[0].rotation.x = 0; rig.arms[1].rotation.x = 0;
+        rig.torsoPivot.rotation.x = 0;
+      }
+    }
+  });
+  three.camera.position.set(0, 30, 0.001);
+  three.camera.up.set(0,0,-1);
+  three.camera.lookAt(0,0,0);
+  document.getElementById('editStepLabel').textContent = `Etapa ${currentStep+1}/${steps.length}`;
+}
+
 function animate3D(){
   if(!three) return;
   requestAnimationFrame(animate3D);
   try{
+    if(three.editMode){
+      renderEditFrame();
+      three.renderer.render(three.scene, three.camera);
+      return;
+    }
     const now = performance.now();
     const dt = Math.min((now-three.lastFrame)/1000, 0.05);
     three.lastFrame = now;
@@ -1008,7 +1125,7 @@ function showViewer3DError(){
 function render3DFrame(tt, dur, durs){
   let povSample = null, povVel = null;
   three.snap.entities.forEach(e=>{
-    const s = sample3D(e.id, tt, durs);
+    const s = sample3D(e.id, tt, durs, e.team==='ball');
     if(!s) return;
     const mesh = three.meshes[e.id];
     mesh.position.copy(s.pos);
@@ -1095,16 +1212,60 @@ document.getElementById('goto3D').onclick = ()=>{
   }
   three.transition = null;
   three.freeLookYaw = 0; three.freeLookPitch = 0;
+  three.editMode = false;
+  document.getElementById('editStepBar').style.display = 'none';
+  document.getElementById('editTopBtn').textContent = '📐 Editar de cima';
+  document.getElementById('viewer3DModeBadge').textContent = 'PRIMEIRA PESSOA';
   three.t = 0; three.playing = true;
   document.getElementById('play3DBtn').textContent = '⏸ Pausar';
   requestAnimationFrame(animate3D);
 };
 document.getElementById('backTo2D').onclick = ()=>{
   three.playing = false;
+  three.editMode = false;
   if(three.povId!=null) selectedId = three.povId;
   document.getElementById('viewer3D').style.display = 'none';
   document.getElementById('editorScreen').style.display = 'flex';
+  updateStepUI();
   layoutCanvas();
+};
+document.getElementById('editTopBtn').onclick = ()=>{
+  three.editMode = !three.editMode;
+  three.playing = false;
+  document.getElementById('editStepBar').style.display = three.editMode ? 'flex' : 'none';
+  document.getElementById('editTopBtn').textContent = three.editMode ? '🎥 Voltar 1ª pessoa' : '📐 Editar de cima';
+  document.getElementById('viewer3DModeBadge').textContent = three.editMode ? 'EDITANDO DE CIMA' : 'PRIMEIRA PESSOA';
+  if(three.editMode){
+    document.getElementById('editStepLabel').textContent = `Etapa ${currentStep+1}/${steps.length}`;
+  } else {
+    three.t = stepStartTime(currentStep);
+    three.transition = null;
+    three.freeLookYaw = 0; three.freeLookPitch = 0;
+    startCameraTransition();
+    three.playing = true;
+  }
+};
+document.getElementById('editStepPrev').onclick = ()=>{
+  if(currentStep>0) currentStep--;
+  document.getElementById('editStepLabel').textContent = `Etapa ${currentStep+1}/${steps.length}`;
+};
+document.getElementById('editStepNext').onclick = ()=>{
+  if(currentStep<steps.length-1) currentStep++;
+  document.getElementById('editStepLabel').textContent = `Etapa ${currentStep+1}/${steps.length}`;
+};
+document.getElementById('editStepAdd').onclick = ()=>{
+  const copy = {};
+  Object.keys(steps[currentStep].positions).forEach(id=>{ copy[id] = {...steps[currentStep].positions[id]}; });
+  steps.splice(currentStep+1, 0, {positions:copy});
+  currentStep++;
+  recomputeAutoFacing(currentStep);
+  document.getElementById('editStepLabel').textContent = `Etapa ${currentStep+1}/${steps.length}`;
+};
+document.getElementById('editStepDel').onclick = ()=>{
+  if(steps.length<=1) return;
+  steps.splice(currentStep,1);
+  currentStep = Math.min(currentStep, steps.length-1);
+  document.getElementById('editStepLabel').textContent = `Etapa ${currentStep+1}/${steps.length}`;
 };
 document.getElementById('povSelect').addEventListener('change', (e)=>{
   three.povId = parseInt(e.target.value);
