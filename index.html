@@ -101,14 +101,19 @@
         <div class="badge">PRIMEIRA PESSOA</div>
       </div>
     </div>
-    <div id="bottombar">
-      <button id="play3DBtn" class="txt">▶ Reproduzir</button>
-      <button id="replay3DBtn" class="txt primary">🔁 Repetir</button>
-      <button id="stop3DBtn" class="txt">⏹ Parar</button>
-      <input type="range" id="scrub3D" min="0" max="1000" value="0">
-      <button class="txt" data-spd3d="0.25">0.25x</button>
-      <button class="txt" data-spd3d="0.5">0.5x</button>
-      <button class="txt primary" data-spd3d="1">1x</button>
+    <div id="bottombar" style="flex-direction:column;align-items:stretch;gap:8px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span id="time3DLabel" style="font-size:14px;color:#ddd;min-width:98px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600;">0.0s / 0.0s</span>
+        <input type="range" id="scrub3D" min="0" max="1000" value="0" style="flex:1;height:30px;">
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <button id="play3DBtn" class="txt">▶ Reproduzir</button>
+        <button id="replay3DBtn" class="txt primary">🔁 Repetir</button>
+        <button id="stop3DBtn" class="txt">⏹ Parar</button>
+        <button class="txt" data-spd3d="0.25">0.25x</button>
+        <button class="txt" data-spd3d="0.5">0.5x</button>
+        <button class="txt primary" data-spd3d="1">1x</button>
+      </div>
     </div>
   </div>
 
@@ -965,6 +970,7 @@ function animate3D(){
       document.getElementById('scrub3D').value = Math.round(three.t/dur*1000);
     }
     const tt = three.t;
+    document.getElementById('time3DLabel').textContent = `${tt.toFixed(1)}s / ${dur.toFixed(1)}s`;
     render3DFrame(tt, dur);
   }catch(err){
     console.error('Erro no render 3D:', err);
