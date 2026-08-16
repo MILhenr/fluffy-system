@@ -121,8 +121,12 @@
         <button id="replay3DBtn" class="txt">🔁 Repetir</button>
         <button id="stop3DBtn" class="txt">⏹ Parar</button>
         <button class="txt" data-spd3d="0.25">0.25x</button>
-        <button class="txt" data-spd3d="0.5">0.5x</button>
         <button class="txt primary" data-spd3d="1">1x</button>
+        <button class="txt" data-spd3d="1.15">1.15x</button>
+        <button class="txt" data-spd3d="1.25">1.25x</button>
+        <button class="txt" data-spd3d="1.35">1.35x</button>
+        <button class="txt" data-spd3d="1.5">1.5x</button>
+        <button class="txt" data-spd3d="2">2x</button>
       </div>
     </div>
   </div>
@@ -138,7 +142,7 @@
    e o ângulo de olhar de cada entidade naquele momento da jogada
    ========================================================================= */
 const COURT_LEN = 52, COURT_WID = 24;
-const MIN_SPEED = 1.4, MAX_SPEED = 7.5, MIN_STEP_DURATION = 0.55;
+const MIN_SPEED = 1.4, MAX_SPEED = 7.5, MIN_STEP_DURATION = 0.28;
 const BALL_SPEED = 9.5; // m/s constante — a bola sempre viaja nessa velocidade,
                          // nunca fica mais lenta só porque um jogador correu
                          // muito no mesmo intervalo.
@@ -254,7 +258,9 @@ function sampleEntityAt(id, t, durs, isBall){
       } else {
         u = dur>0 ? Math.max(0,Math.min(1,(t-acc)/dur)) : 1;
       }
-      const ue = u*u*(3-2*u);
+      // interpolação linear — sem suavizar/desacelerar em cada etapa, pra não
+      // criar aquele instante de "pausa" ao chegar em cada uma (futsal é contínuo).
+      const ue = u;
       return { x:a.x+(b.x-a.x)*ue, y:a.y+(b.y-a.y)*ue, facingAngle: lerpAngle(a.facingAngle||0, b.facingAngle||0, ue) };
     }
     acc += dur;
@@ -500,6 +506,21 @@ function recomputeAllStepsAutoFacing(){
 function addEntityToAllSteps(id, pos){
   steps.forEach(st=>{ if(!st.positions[id]) st.positions[id] = {x:pos.x, y:pos.y, facingAngle:pos.facingAngle, customFacing:false}; });
 }
+function populateBaseSquad(){
+  const blueXs = [0.2,0.4,0.6,0.8];
+  const redXs = [0.2,0.4,0.6,0.8];
+  blueXs.forEach(x=>{
+    const id = idCounter++;
+    entities.push({id, team:'blue', number:nextBlueNum++, name:''});
+    addEntityToAllSteps(id, {x, y:0.22, facingAngle:-Math.PI/2});
+  });
+  redXs.forEach(x=>{
+    const id = idCounter++;
+    entities.push({id, team:'red', number:nextRedNum++, name:''});
+    addEntityToAllSteps(id, {x, y:0.78, facingAngle:Math.PI/2});
+  });
+  recomputeAllStepsAutoFacing();
+}
 document.getElementById('addBlue').onclick = ()=>{
   const id = idCounter++;
   const pos = {x:0.5+Math.random()*0.1-0.05, y:0.35, facingAngle:-Math.PI/2};
@@ -528,6 +549,7 @@ document.getElementById('addBall').onclick = ()=>{
 document.getElementById('clearAll').onclick = ()=>{
   entities = []; steps=[{positions:{}}]; currentStep=0; selectedId = null; nextBlueNum=1; nextRedNum=1;
   document.getElementById('addBall').disabled = false;
+  populateBaseSquad();
   updateStepUI(); draw(); refreshPovSelect();
 };
 document.getElementById('delBtn').onclick = ()=>{
@@ -645,7 +667,10 @@ document.querySelectorAll('#editorScreen #bottombar button[data-spd]').forEach(b
 });
 
 window.addEventListener('resize', ()=>{ if(document.getElementById('editorScreen').style.display!=='none') layoutCanvas(); });
-loadBoard().then(()=>{ updateStepUI(); layoutCanvas(); });
+loadBoard().then(()=>{
+  if(entities.length===0) populateBaseSquad();
+  updateStepUI(); draw(); layoutCanvas();
+});
 updateStepUI();
 layoutCanvas();
 
