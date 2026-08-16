@@ -575,7 +575,7 @@ layoutCanvas();
 let three = null;
 
 function toWorld(fx, fy){
-  return new THREE.Vector3((fy-0.5)*COURT_LEN, 0, (fx-0.5)*COURT_WID);
+  return new THREE.Vector3((fy-0.5)*COURT_LEN, 0, -(fx-0.5)*COURT_WID);
 }
 
 function buildSnapshot(){
@@ -609,6 +609,44 @@ function makeNumberTexture(text, team){
   tex.encoding = THREE.sRGBEncoding;
   return tex;
 }
+function makeWoodFloorTexture(){
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 512;
+  const ctx2 = c.getContext('2d');
+  const grad = ctx2.createLinearGradient(0,0,512,0);
+  grad.addColorStop(0,'#c99f6b'); grad.addColorStop(0.5,'#dcb37e'); grad.addColorStop(1,'#c99f6b');
+  ctx2.fillStyle = grad; ctx2.fillRect(0,0,512,512);
+  const plankW = 42;
+  for(let x=0; x<512; x+=plankW){
+    // leve variação de tom por táboa
+    ctx2.fillStyle = `rgba(${Math.random()<0.5?'90,60,30':'190,150,100'},${(Math.random()*0.05+0.02).toFixed(2)})`;
+    ctx2.fillRect(x,0,plankW,512);
+    ctx2.strokeStyle = 'rgba(90,60,30,0.35)';
+    ctx2.lineWidth = 1.4;
+    ctx2.beginPath(); ctx2.moveTo(x,0); ctx2.lineTo(x,512); ctx2.stroke();
+    // veios da madeira
+    for(let i=0;i<10;i++){
+      const gy = Math.random()*512;
+      ctx2.strokeStyle = 'rgba(90,60,30,0.10)';
+      ctx2.lineWidth = 1;
+      ctx2.beginPath();
+      ctx2.moveTo(x+3, gy);
+      ctx2.bezierCurveTo(x+plankW*0.3,gy+8, x+plankW*0.7,gy-8, x+plankW-3, gy+4);
+      ctx2.stroke();
+    }
+    // juntas horizontais das táboas (efeito assoalho)
+    for(let y=0;y<512;y+=128){
+      ctx2.strokeStyle = 'rgba(90,60,30,0.18)';
+      ctx2.beginPath(); ctx2.moveTo(x,y); ctx2.lineTo(x+plankW,y); ctx2.stroke();
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
+  tex.encoding = THREE.sRGBEncoding;
+  tex.repeat.set(COURT_LEN/9, COURT_WID/9);
+  return tex;
+}
+
 function makeSoccerBallTexture(){
   const c = document.createElement('canvas');
   c.width = 256; c.height = 128;
@@ -708,7 +746,7 @@ function initThree(){
 
   const HL = COURT_LEN/2, HW = COURT_WID/2;
 
-  const courtMat = new THREE.MeshLambertMaterial({color:0x3a3a3a});
+  const courtMat = new THREE.MeshLambertMaterial({map: makeWoodFloorTexture()});
   const courtPlane = new THREE.Mesh(new THREE.PlaneGeometry(COURT_LEN, COURT_WID), courtMat);
   courtPlane.rotation.x = -Math.PI/2; courtPlane.receiveShadow = true; scene.add(courtPlane);
 
@@ -882,7 +920,7 @@ function animate3D(){
 
     // a direção do olhar SEMPRE segue o ângulo definido na prancha (interpolado
     // entre as etapas) — não é mais sobrescrita pela direção do movimento.
-    const dir = new THREE.Vector3(Math.sin(s.facingAngle), 0, Math.cos(s.facingAngle));
+    const dir = new THREE.Vector3(Math.sin(s.facingAngle), 0, -Math.cos(s.facingAngle));
     const pitch = -0.03 - Math.min(speedA,6)*0.032;
     const target = basePos.clone().add(dir.multiplyScalar(5));
     target.y = basePos.y + Math.tan(pitch)*5;
