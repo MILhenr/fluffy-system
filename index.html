@@ -107,8 +107,8 @@
         <input type="range" id="scrub3D" min="0" max="1000" value="0" style="flex:1;height:30px;">
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <button id="play3DBtn" class="txt">▶ Reproduzir</button>
-        <button id="replay3DBtn" class="txt primary">🔁 Repetir</button>
+        <button id="play3DBtn" class="txt primary" style="font-size:17px;padding:14px 26px;font-weight:700;">⏸ Pausar</button>
+        <button id="replay3DBtn" class="txt">🔁 Repetir</button>
         <button id="stop3DBtn" class="txt">⏹ Parar</button>
         <button class="txt" data-spd3d="0.25">0.25x</button>
         <button class="txt" data-spd3d="0.5">0.5x</button>
@@ -208,11 +208,11 @@ function segmentDuration(i){
   return Math.max(maxLen/MAX_SPEED, MIN_STEP_DURATION);
 }
 function allDurations(){ const d=[]; for(let i=0;i<steps.length-1;i++) d.push(segmentDuration(i)); return d; }
-function totalDuration(){ return allDurations().reduce((a,b)=>a+b,0) || 0.01; }
+function totalDuration(durs){ durs = durs || allDurations(); return durs.reduce((a,b)=>a+b,0) || 0.01; }
 
-function sampleEntityAt(id, t){
+function sampleEntityAt(id, t, durs){
   if(steps.length===1 || !steps[0].positions[id]) return steps[currentStep].positions[id] || null;
-  const durs = allDurations();
+  if(!durs) durs = allDurations();
   let acc = 0;
   for(let i=0;i<steps.length-1;i++){
     const dur = durs[i];
@@ -258,7 +258,7 @@ function drawEntityAt(e, pos, isPlaying){
       if(!started){ ctx.moveTo(pp.x,pp.y); started=true; } else ctx.lineTo(pp.x,pp.y);
     });
     ctx.stroke(); ctx.restore();
-    // pontinhos em cada etapa
+    // pontinhos em cada etapa — no jogador selecionado, mostra o número da etapa
     steps.forEach((st,i)=>{
       const sp = st.positions[e.id];
       if(!sp) return;
@@ -267,6 +267,16 @@ function drawEntityAt(e, pos, isPlaying){
       ctx.fillStyle = i===currentStep ? '#fff59d' : entityTrailColor(e);
       ctx.globalAlpha = i===currentStep ? 1 : 0.7;
       ctx.fill(); ctx.globalAlpha = 1;
+      if(e.id===selectedId){
+        ctx.font = `700 ${Math.max(9,Math.round(R*0.3))}px -apple-system, sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#0a0a0a';
+        ctx.beginPath(); ctx.arc(pp.x, pp.y-R*0.42, R*0.22, 0, Math.PI*2);
+        ctx.fillStyle = i===currentStep ? '#fff59d' : '#e8e8e8';
+        ctx.fill();
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillText(String(i+1), pp.x, pp.y-R*0.42+1);
+      }
     });
   }
 
@@ -563,13 +573,14 @@ document.getElementById('saveBtn').onclick = saveBoard;
 let playing2D = false, playStart2D = 0, speed2D = 1;
 function playLoop2D(){
   if(!playing2D) return;
+  const durs = allDurations();
+  const dur = totalDuration(durs);
   const elapsed = (performance.now()-playStart2D)/1000 * speed2D;
-  const dur = totalDuration();
   const t = Math.min(elapsed, dur);
   document.getElementById('scrub').value = Math.round(t/dur*1000);
   drawCourt();
   entities.forEach(e=>{
-    const pos = sampleEntityAt(e.id, t);
+    const pos = sampleEntityAt(e.id, t, durs);
     drawEntityAt(e, pos, true);
   });
   if(elapsed>=dur){ playing2D=false; document.getElementById('playBtn').textContent='▶ Reproduzir tudo'; return; }
@@ -620,13 +631,13 @@ function buildSnapshot(){
     entities: entities.map(e=>({id:e.id, team:e.team, number:e.number, name:e.name}))
   };
 }
-function sample3D(id, t){
-  const p = sampleEntityAt(id, t);
+function sample3D(id, t, durs){
+  const p = sampleEntityAt(id, t, durs);
   if(!p) return null;
   return { pos: toWorld(p.x,p.y), facingAngle: p.facingAngle ?? -Math.PI/2 };
 }
-function velocity3D(id, t, dt=0.05){
-  const a = sample3D(id, Math.max(0,t-dt)), b = sample3D(id, t+dt);
+function velocity3D(id, t, dt=0.05, durs){
+  const a = sample3D(id, Math.max(0,t-dt), durs), b = sample3D(id, t+dt, durs);
   if(!a||!b) return new THREE.Vector3();
   return b.pos.clone().sub(a.pos).multiplyScalar(1/(2*dt));
 }
@@ -959,7 +970,8 @@ function animate3D(){
     const now = performance.now();
     const dt = Math.min((now-three.lastFrame)/1000, 0.05);
     three.lastFrame = now;
-    const dur = totalDuration();
+    const durs = allDurations();
+    const dur = totalDuration(durs);
     if(three.playing){
       three.t += dt*three.speed;
       if(three.t>dur){
@@ -971,7 +983,7 @@ function animate3D(){
     }
     const tt = three.t;
     document.getElementById('time3DLabel').textContent = `${tt.toFixed(1)}s / ${dur.toFixed(1)}s`;
-    render3DFrame(tt, dur);
+    render3DFrame(tt, dur, durs);
   }catch(err){
     console.error('Erro no render 3D:', err);
     showViewer3DError();
@@ -993,14 +1005,16 @@ function showViewer3DError(){
   };
 }
 
-function render3DFrame(tt, dur){
+function render3DFrame(tt, dur, durs){
+  let povSample = null, povVel = null;
   three.snap.entities.forEach(e=>{
-    const s = sample3D(e.id, tt);
+    const s = sample3D(e.id, tt, durs);
     if(!s) return;
     const mesh = three.meshes[e.id];
     mesh.position.copy(s.pos);
     if(e.team!=='ball'){
-      const v = velocity3D(e.id, tt);
+      const v = velocity3D(e.id, tt, 0.05, durs);
+      if(e.id===three.povId){ povSample = s; povVel = v; }
       const spd = v.length();
       // corpo aponta pra direção do movimento; se parado, usa o ângulo definido na prancha
       mesh.rotation.y = spd>0.3 ? Math.atan2(v.x, v.z) : s.facingAngle;
@@ -1022,9 +1036,9 @@ function render3DFrame(tt, dur){
   });
 
   const povEntity = three.snap.entities.find(e=>e.id===three.povId);
-  if(povEntity){
-    const s = sample3D(povEntity.id, tt);
-    const v = velocity3D(povEntity.id, tt);
+  if(povEntity && povSample){
+    const s = povSample;
+    const v = povVel;
     const speedA = Math.min(v.length(), 9);
     const eyeHeight = 1.68;
     const basePos = s.pos.clone(); basePos.y = eyeHeight;
