@@ -101,6 +101,7 @@
     </div>
     <div id="bottombar">
       <button id="play3DBtn" class="txt">▶ Reproduzir</button>
+      <button id="replay3DBtn" class="txt primary">🔁 Repetir</button>
       <button id="stop3DBtn" class="txt">⏹ Parar</button>
       <input type="range" id="scrub3D" min="0" max="1000" value="0">
       <button class="txt" data-spd3d="0.25">0.25x</button>
@@ -726,12 +727,20 @@ function initThree(){
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.gammaFactor = 2.2;
   wrap.appendChild(renderer.domElement);
+  renderer.domElement.addEventListener('webglcontextlost', (ev)=>{
+    ev.preventDefault();
+    console.error('Contexto WebGL perdido');
+    if(three) showViewer3DError();
+  });
+  renderer.domElement.addEventListener('webglcontextrestored', ()=>{
+    if(three){ try{ rebuild3DScene(); }catch(e){ console.error(e); } }
+  });
   const camera = new THREE.PerspectiveCamera(72, wrap.clientWidth/wrap.clientHeight, 0.05, 300);
 
   scene.add(new THREE.AmbientLight(0x888888, 0.75));
   const dl = new THREE.DirectionalLight(0xffffff, 0.75);
   dl.castShadow = true;
-  dl.shadow.mapSize.set(2048,2048);
+  dl.shadow.mapSize.set(1024,1024);
   dl.shadow.camera.left = -COURT_LEN/2-4; dl.shadow.camera.right = COURT_LEN/2+4;
   dl.shadow.camera.top = COURT_WID/2+4; dl.shadow.camera.bottom = -COURT_WID/2-4;
   dl.shadow.camera.near = 1; dl.shadow.camera.far = 60;
@@ -862,17 +871,44 @@ function startCameraTransition(){
 function animate3D(){
   if(!three) return;
   requestAnimationFrame(animate3D);
-  const now = performance.now();
-  const dt = Math.min((now-three.lastFrame)/1000, 0.05);
-  three.lastFrame = now;
-  const dur = totalDuration();
-  if(three.playing){
-    three.t += dt*three.speed;
-    if(three.t>dur){ three.t = dur; three.playing = false; document.getElementById('play3DBtn').textContent = '▶ Reproduzir'; }
-    document.getElementById('scrub3D').value = Math.round(three.t/dur*1000);
+  try{
+    const now = performance.now();
+    const dt = Math.min((now-three.lastFrame)/1000, 0.05);
+    three.lastFrame = now;
+    const dur = totalDuration();
+    if(three.playing){
+      three.t += dt*three.speed;
+      if(three.t>dur){
+        // repete sozinho em loop, sem precisar voltar e clicar de novo
+        three.t = 0;
+        three.transition = null;
+      }
+      document.getElementById('scrub3D').value = Math.round(three.t/dur*1000);
+    }
+    const tt = three.t;
+    render3DFrame(tt, dur);
+  }catch(err){
+    console.error('Erro no render 3D:', err);
+    showViewer3DError();
   }
-  const tt = three.t;
+}
 
+function showViewer3DError(){
+  three.playing = false;
+  const wrap = document.getElementById('v3dCanvasWrap');
+  if(document.getElementById('v3dErrorMsg')) return;
+  const msg = document.createElement('div');
+  msg.id = 'v3dErrorMsg';
+  msg.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;padding:20px;text-align:center;color:#eee;background:rgba(10,10,10,0.9);';
+  msg.innerHTML = '<div style="font-size:15px;font-weight:600;">Não deu pra renderizar o 3D agora</div><div style="font-size:12.5px;color:#999;max-width:280px;">Pode ser a quantidade de jogadores/etapas ou a memória do navegador. Tente voltar, reduzir etapas/jogadores, ou recarregar a página.</div><button id="v3dRetryBtn" style="margin-top:6px;background:#2c4270;border:1px solid #3d5a95;color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;">Tentar de novo</button>';
+  wrap.appendChild(msg);
+  document.getElementById('v3dRetryBtn').onclick = ()=>{
+    msg.remove();
+    try{ rebuild3DScene(); three.t=0; three.playing=true; }catch(e){ console.error(e); }
+  };
+}
+
+function render3DFrame(tt, dur){
   three.snap.entities.forEach(e=>{
     const s = sample3D(e.id, tt);
     if(!s) return;
@@ -978,6 +1014,13 @@ document.getElementById('play3DBtn').onclick = ()=>{
   if(three.t>=totalDuration()){ three.t = 0; }
   three.playing = !three.playing;
   document.getElementById('play3DBtn').textContent = three.playing ? '⏸ Pausar' : '▶ Reproduzir';
+};
+document.getElementById('replay3DBtn').onclick = ()=>{
+  three.t = 0;
+  three.transition = null;
+  three.playing = true;
+  document.getElementById('play3DBtn').textContent = '⏸ Pausar';
+  document.getElementById('scrub3D').value = 0;
 };
 document.getElementById('stop3DBtn').onclick = ()=>{
   three.playing = false; three.t = 0;
