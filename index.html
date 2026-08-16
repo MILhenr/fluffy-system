@@ -6,9 +6,10 @@
 <style>
   html,body{margin:0;padding:0;background:#0a0a0a;color:#eee;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;height:100%;overflow:hidden;}
   #app{display:flex;flex-direction:column;height:100vh;width:100vw;}
-  #toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:5px 12px;background:#151515;border-bottom:1px solid #262626;}
-  .iconbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:#202020;border:1px solid #333;color:#eee;width:58px;height:50px;border-radius:12px;cursor:pointer;font-size:10.5px;line-height:1;flex-shrink:0;}
-  .iconbtn .ic{font-size:20px;line-height:1;}
+  #toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:9px 14px;background:#151515;border-bottom:1px solid #262626;}
+  .iconbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:#232323;border:1px solid #3a3a3a;color:#eee;width:68px;height:60px;border-radius:16px;cursor:pointer;font-size:11.5px;line-height:1;flex-shrink:0;box-shadow:0 2px 5px rgba(0,0,0,.25);transition:transform .08s;}
+  .iconbtn:active{transform:scale(0.93);}
+  .iconbtn .ic{font-size:24px;line-height:1;}
   .iconbtn:hover{background:#2a2a2a;}
   .iconbtn:disabled{opacity:.3;cursor:default;}
   .iconbtn.primary{background:#2c4270;border-color:#3d5a95;}
@@ -16,9 +17,11 @@
   #toolbar button.txt{background:#202020;border:1px solid #333;color:#eee;padding:11px 16px;border-radius:12px;font-size:14.5px;cursor:pointer;white-space:nowrap;}
   #toolbar button.txt:hover{background:#2a2a2a;}
   #toolbar button.txt.primary{background:#2c4270;border-color:#3d5a95;}
-  #toolbar .sep{width:1px;height:40px;background:#2c2c2c;margin:0 2px;}
-  #stepbar{display:flex;align-items:center;gap:8px;padding:4px 12px;background:#101010;border-bottom:1px solid #262626;}
-  #stepbar button.txt{background:#202020;border:1px solid #333;color:#eee;padding:7px 12px;border-radius:10px;font-size:13px;cursor:pointer;}
+  #toolbar .sep{width:1px;height:44px;background:#2c2c2c;margin:0 4px;}
+  #stepbar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:#101010;border-bottom:1px solid #262626;}
+  #stepbar button.txt{border:1px solid #3a3a3a;color:#eee;padding:11px 16px;border-radius:14px;font-size:15px;cursor:pointer;font-weight:600;box-shadow:0 2px 5px rgba(0,0,0,.25);}
+  #stepAdd{background:#274a30;border-color:#3a7048;}
+  #stepDel{background:#4a2a2a;border-color:#6a3a3a;}
   #stepLabel{font-size:13px;color:#ddd;min-width:64px;text-align:center;font-weight:600;}
   #stepSlider{flex:1;accent-color:#e0b84a;}
   #stage{flex:1;position:relative;overflow:hidden;background:#0a0a0a;display:flex;align-items:center;justify-content:center;}
@@ -219,17 +222,25 @@ function sampleEntityAt(id, t){
   return steps[steps.length-1].positions[id];
 }
 
+const TRAIL_PALETTE = ['#5b8cff','#ff6b6b','#4ade80','#facc15','#c084fc','#38bdf8','#fb923c','#f472b6','#a3e635','#2dd4bf'];
+function entityTrailColor(e){
+  if(e.team==='ball') return '#e8d840';
+  const idx = entities.filter(x=>x.team!=='ball').findIndex(x=>x.id===e.id);
+  return TRAIL_PALETTE[idx % TRAIL_PALETTE.length];
+}
+
 function drawEntityAt(e, pos, isPlaying){
   if(!pos) return;
   const p = toPx(pos.x, pos.y);
   const R = court.w*0.075;
 
-  if(e.team!=='ball' && !isPlaying){
-    // trajeto: linha ligando as posições da entidade em cada etapa
+  if(!isPlaying){
+    // trajeto: linha ligando as posições da entidade em cada etapa, cor própria
     ctx.save();
-    ctx.setLineDash([court.w*0.01, court.w*0.009]);
-    ctx.strokeStyle = e.team==='blue' ? 'rgba(120,160,255,0.55)' : 'rgba(255,140,140,0.55)';
-    ctx.lineWidth = Math.max(1.5, court.w*0.005);
+    ctx.setLineDash(e.team==='ball' ? [court.w*0.006, court.w*0.012] : [court.w*0.01, court.w*0.009]);
+    ctx.strokeStyle = entityTrailColor(e);
+    ctx.globalAlpha = e.team==='ball' ? 0.8 : 0.65;
+    ctx.lineWidth = Math.max(1.5, court.w*(e.team==='ball'?0.0045:0.005));
     ctx.beginPath();
     let started = false;
     steps.forEach(st=>{
@@ -245,8 +256,9 @@ function drawEntityAt(e, pos, isPlaying){
       if(!sp) return;
       const pp = toPx(sp.x, sp.y);
       ctx.beginPath(); ctx.arc(pp.x,pp.y, i===currentStep? R*0.13 : R*0.08, 0, Math.PI*2);
-      ctx.fillStyle = i===currentStep ? '#fff59d' : 'rgba(255,255,255,0.5)';
-      ctx.fill();
+      ctx.fillStyle = i===currentStep ? '#fff59d' : entityTrailColor(e);
+      ctx.globalAlpha = i===currentStep ? 1 : 0.7;
+      ctx.fill(); ctx.globalAlpha = 1;
     });
   }
 
@@ -593,7 +605,9 @@ function makeNumberTexture(text, team){
   ctx2.font = '700 64px -apple-system, sans-serif';
   ctx2.textAlign = 'center'; ctx2.textBaseline = 'middle';
   ctx2.fillText(String(text||''), 64, 68);
-  return new THREE.CanvasTexture(c);
+  const tex = new THREE.CanvasTexture(c);
+  tex.encoding = THREE.sRGBEncoding;
+  return tex;
 }
 function makeSoccerBallTexture(){
   const c = document.createElement('canvas');
@@ -614,6 +628,7 @@ function makeSoccerBallTexture(){
     .forEach(([x,y])=>pent(x,y,13));
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
+  tex.encoding = THREE.sRGBEncoding;
   return tex;
 }
 
@@ -670,6 +685,8 @@ function initThree(){
   renderer.setSize(wrap.clientWidth, wrap.clientHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.gammaFactor = 2.2;
   wrap.appendChild(renderer.domElement);
   const camera = new THREE.PerspectiveCamera(72, wrap.clientWidth/wrap.clientHeight, 0.05, 300);
 
@@ -725,31 +742,32 @@ function initThree(){
   scene.add(buildGoalFrame(1));
   scene.add(buildGoalFrame(-1));
 
-  // ---- fundos: um par atrás dos gols, outro par atrás das arquibancadas/laterais ----
-  const backdropMatGoal1 = new THREE.MeshBasicMaterial({color:0x2a2a2a});
-  const backdropMatGoal2 = new THREE.MeshBasicMaterial({color:0x2a2a2a});
-  const goalBackdropH = 16, goalBackdropW = COURT_WID+14;
-  const goalBackdrop1 = new THREE.Mesh(new THREE.PlaneGeometry(goalBackdropW, goalBackdropH), backdropMatGoal1);
-  goalBackdrop1.position.set(HL+9, goalBackdropH/2-1, 0); goalBackdrop1.rotation.y = -Math.PI/2;
-  scene.add(goalBackdrop1);
-  const goalBackdrop2 = new THREE.Mesh(new THREE.PlaneGeometry(goalBackdropW, goalBackdropH), backdropMatGoal2);
-  goalBackdrop2.position.set(-HL-9, goalBackdropH/2-1, 0); goalBackdrop2.rotation.y = Math.PI/2;
-  scene.add(goalBackdrop2);
+  // ---- fundos: um par atrás dos gols, outro par atrás das laterais ----
+  // ficam mais perto da quadra, e quando uma foto é carregada a geometria
+  // é refeita respeitando a proporção real da imagem (sem esticar).
+  function buildBackdropPair(baseW, baseH, positionFn){
+    const matA = new THREE.MeshBasicMaterial({color:0x2a2a2a});
+    const matB = new THREE.MeshBasicMaterial({color:0x2a2a2a});
+    const meshA = new THREE.Mesh(new THREE.PlaneGeometry(baseW, baseH), matA);
+    const meshB = new THREE.Mesh(new THREE.PlaneGeometry(baseW, baseH), matB);
+    positionFn(meshA, meshB, baseH);
+    scene.add(meshA); scene.add(meshB);
+    return {meshA, meshB, matA, matB, baseW, baseH};
+  }
 
-  const backdropMatStand1 = new THREE.MeshBasicMaterial({color:0x232323});
-  const backdropMatStand2 = new THREE.MeshBasicMaterial({color:0x232323});
-  const standBackdropW = COURT_LEN+18, standBackdropH = 16;
-  const standBackdrop1 = new THREE.Mesh(new THREE.PlaneGeometry(standBackdropW, standBackdropH), backdropMatStand1);
-  standBackdrop1.position.set(0, standBackdropH/2-1, HW+9); standBackdrop1.rotation.y = Math.PI;
-  scene.add(standBackdrop1);
-  const standBackdrop2 = new THREE.Mesh(new THREE.PlaneGeometry(standBackdropW, standBackdropH), backdropMatStand2);
-  standBackdrop2.position.set(0, standBackdropH/2-1, -HW-9);
-  scene.add(standBackdrop2);
+  const goalBackdrops = buildBackdropPair(COURT_WID+8, 11, (mA,mB,h)=>{
+    mA.position.set(HL+3.2, h/2-0.3, 0); mA.rotation.y = -Math.PI/2;
+    mB.position.set(-HL-3.2, h/2-0.3, 0); mB.rotation.y = Math.PI/2;
+  });
+  const standBackdrops = buildBackdropPair(COURT_LEN+10, 11, (mA,mB,h)=>{
+    mA.position.set(0, h/2-0.3, HW+3.5); mA.rotation.y = Math.PI;
+    mB.position.set(0, h/2-0.3, -HW-3.5);
+  });
 
   three = {
     scene, renderer, camera, wrap, meshes:{}, t:0, playing:true, speed:1,
     shakeSeed:Math.random()*1000, povId:null, lastFrame:performance.now(),
-    backdrops:{ goal:[backdropMatGoal1,backdropMatGoal2], stand:[backdropMatStand1,backdropMatStand2] },
+    backdrops:{ goal:goalBackdrops, stand:standBackdrops },
     transition:null
   };
 
@@ -952,8 +970,25 @@ function wireBackdropUpload(btnId, inputId, key){
       const img = new Image();
       img.onload = ()=>{
         const tex = new THREE.Texture(img);
+        tex.encoding = THREE.sRGBEncoding;
+        tex.anisotropy = three.renderer.capabilities.getMaxAnisotropy ? three.renderer.capabilities.getMaxAnisotropy() : 1;
         tex.needsUpdate = true;
-        three.backdrops[key].forEach(mat=>{ mat.map = tex; mat.color.set(0xffffff); mat.needsUpdate = true; });
+
+        const bd = three.backdrops[key];
+        const imgAspect = img.naturalWidth / img.naturalHeight;
+        // mantém a altura do painel e ajusta a largura pela proporção real da
+        // foto, recortando o excesso via repeat pra preencher sem esticar
+        const panelAspect = bd.baseW / bd.baseH;
+        if(imgAspect > panelAspect){
+          const scale = panelAspect / imgAspect;
+          tex.repeat.set(scale, 1); tex.offset.set((1-scale)/2, 0);
+        } else {
+          const scale = imgAspect / panelAspect;
+          tex.repeat.set(1, scale); tex.offset.set(0, (1-scale)/2);
+        }
+        tex.wrapS = THREE.ClampToEdgeWrapping; tex.wrapT = THREE.ClampToEdgeWrapping;
+
+        [bd.matA, bd.matB].forEach(mat=>{ mat.map = tex; mat.color.set(0xffffff); mat.needsUpdate = true; });
       };
       img.src = e.target.result;
     };
