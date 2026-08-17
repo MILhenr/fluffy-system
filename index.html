@@ -66,7 +66,8 @@
       <button id="stepDel" class="txt">➖ Remover</button>
       <span id="stepLabel">Etapa 1/1</span>
       <input type="range" id="stepSlider" min="0" max="0" step="1" value="0">
-      <button id="clearAll" class="iconbtn warn" style="width:44px;height:44px;flex-shrink:0;"><span class="ic" style="font-size:16px;">🗂️</span></button>
+      <button id="clearSteps" class="iconbtn warn" style="width:44px;height:44px;flex-shrink:0;" title="Limpar etapas"><span class="ic" style="font-size:16px;">🧹</span></button>
+      <button id="clearAll" class="iconbtn warn" style="width:44px;height:44px;flex-shrink:0;" title="Nova prancha"><span class="ic" style="font-size:16px;">🗂️</span></button>
     </div>
 
     <div id="stage">
@@ -111,10 +112,11 @@
         <div class="badge" id="viewer3DModeBadge">PRIMEIRA PESSOA</div>
       </div>
     </div>
-    <div id="bottombar" style="flex-direction:column;align-items:stretch;gap:8px;">
+    <div id="bottombar" style="flex-direction:column;align-items:stretch;gap:8px;padding-bottom:max(18px, env(safe-area-inset-bottom));">
       <div style="display:flex;align-items:center;gap:12px;">
         <span id="time3DLabel" style="font-size:14px;color:#ddd;min-width:98px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600;">0.0s / 0.0s</span>
         <input type="range" id="scrub3D" min="0" max="1000" value="0" style="flex:1;height:30px;">
+        <button id="record3DBtn" class="txt" style="background:#4a2020;border-color:#7a3030;">⏺ Gravar</button>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <button id="play3DBtn" class="txt primary" style="font-size:17px;padding:14px 26px;font-weight:700;">⏸ Pausar</button>
@@ -143,7 +145,7 @@
    ========================================================================= */
 const COURT_LEN = 52, COURT_WID = 24;
 const MIN_SPEED = 1.4, MAX_SPEED = 7.5, MIN_STEP_DURATION = 0.28;
-const BALL_SPEED = 9.5; // m/s constante — a bola sempre viaja nessa velocidade,
+const BALL_SPEED = 13.5; // m/s constante — a bola sempre viaja nessa velocidade,
                          // nunca fica mais lenta só porque um jogador correu
                          // muito no mesmo intervalo.
 
@@ -545,6 +547,13 @@ document.getElementById('addBall').onclick = ()=>{
   recomputeAllStepsAutoFacing();
   document.getElementById('addBall').disabled = true;
   draw();
+};
+document.getElementById('clearSteps').onclick = ()=>{
+  const keep = {};
+  Object.keys(steps[currentStep].positions).forEach(id=>{ keep[id] = {...steps[currentStep].positions[id]}; });
+  steps = [{positions: keep}];
+  currentStep = 0;
+  updateStepUI(); draw();
 };
 document.getElementById('clearAll').onclick = ()=>{
   entities = []; steps=[{positions:{}}]; currentStep=0; selectedId = null; nextBlueNum=1; nextRedNum=1;
@@ -1014,7 +1023,7 @@ function initThree(){
   three = {
     scene, renderer, camera, wrap, meshes:{}, t:0, playing:true, speed:1,
     shakeSeed:Math.random()*1000, povId:null, lastFrame:performance.now(),
-    freeLookYaw:0, freeLookPitch:0, editMode:false,
+    freeLookYaw:0, freeLookPitch:0, editMode:false, isRecording:false,
     backdrops:{ goal:goalBackdrops, stand:standBackdrops, roof:roofBackdrop },
     transition:null
   };
@@ -1117,9 +1126,14 @@ function animate3D(){
     if(three.playing){
       three.t += dt*three.speed;
       if(three.t>dur){
-        // repete sozinho em loop, sem precisar voltar e clicar de novo
-        three.t = 0;
-        three.transition = null;
+        if(three.isRecording){
+          three.t = dur;
+          stopRecordingManual();
+        } else {
+          // repete sozinho em loop, sem precisar voltar e clicar de novo
+          three.t = 0;
+          three.transition = null;
+        }
       }
       document.getElementById('scrub3D').value = Math.round(three.t/dur*1000);
     }
@@ -1328,6 +1342,69 @@ document.querySelectorAll('#viewer3D #bottombar button[data-spd3d]').forEach(b=>
     three.speed = parseFloat(b.dataset.spd3d);
   });
 });
+
+// ---------------------------------------------------------------------------
+// GRAVAR o lance em 3D e salvar/compartilhar (vai pra galeria via a folha de
+// compartilhamento do celular, quando o navegador suportar).
+// ---------------------------------------------------------------------------
+let mediaRecorder = null, recordedChunks = [];
+function pickMimeType(){
+  const options = ['video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  for(const t of options){ if(window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) return t; }
+  return '';
+}
+function startRecording(){
+  if(!three || !three.renderer.domElement.captureStream){
+    alert('Esse navegador não suporta gravar direto. Tente atualizar o app/navegador, ou grave a tela pelo recurso nativo do celular.');
+    return;
+  }
+  const stream = three.renderer.domElement.captureStream(30);
+  const mimeType = pickMimeType();
+  recordedChunks = [];
+  try{
+    mediaRecorder = mimeType ? new MediaRecorder(stream, {mimeType}) : new MediaRecorder(stream);
+  }catch(e){
+    console.error(e);
+    alert('Não consegui iniciar a gravação nesse navegador.');
+    return;
+  }
+  mediaRecorder.ondataavailable = (e)=>{ if(e.data && e.data.size>0) recordedChunks.push(e.data); };
+  mediaRecorder.onstop = onRecordingStop;
+  mediaRecorder.start();
+  three.isRecording = true;
+  // recomeça o lance do zero, do primeiro ao último instante, pra gravar completo
+  three.t = 0; three.playing = true; three.transition = null;
+  document.getElementById('play3DBtn').textContent = '⏸ Pausar';
+  document.getElementById('record3DBtn').textContent = '⏹ Parar gravação';
+  document.getElementById('record3DBtn').style.background = '#7a2020';
+}
+function stopRecordingManual(){
+  three.isRecording = false;
+  if(mediaRecorder && mediaRecorder.state!=='inactive') mediaRecorder.stop();
+  document.getElementById('record3DBtn').textContent = '⏺ Gravar';
+  document.getElementById('record3DBtn').style.background = '#4a2020';
+}
+async function onRecordingStop(){
+  if(recordedChunks.length===0) return;
+  const blob = new Blob(recordedChunks, {type: recordedChunks[0].type || 'video/webm'});
+  const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
+  const file = new File([blob], `lance-3d.${ext}`, {type: blob.type});
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{
+      await navigator.share({files:[file], title:'Lance 3D'});
+      return;
+    }catch(e){ /* usuário cancelou o compartilhamento — cai pro download abaixo */ }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `lance-3d.${ext}`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 8000);
+}
+document.getElementById('record3DBtn').onclick = ()=>{
+  if(three.isRecording) stopRecordingManual();
+  else startRecording();
+};
 
 function wireBackdropUpload(btnId, inputId, key){
   document.getElementById(btnId).onclick = ()=> document.getElementById(inputId).click();
