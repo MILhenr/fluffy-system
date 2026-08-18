@@ -88,23 +88,24 @@
       <div class="sep"></div>
       <span style="font-size:13.5px;color:#999;">Visão do jogador:</span>
       <select id="povSelect"></select>
-      <div class="sep"></div>
-      <button id="editTopBtn" class="txt primary">📐 Editar de cima</button>
-      <div class="sep"></div>
-      <button id="bgGoalBtn" class="txt">🥅 Fundo do gol</button>
-      <input type="file" id="bgGoalInput" accept="image/*" style="display:none">
-      <button id="bgStandBtn" class="txt">🏟️ Fundo da arquibancada</button>
-      <input type="file" id="bgStandInput" accept="image/*" style="display:none">
+    </div>
+    <div id="bgToolbar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 14px;background:#101010;border-bottom:1px solid #262626;">
+      <button id="bgGoal1Btn" class="txt">🥅 Fundo do gol 1</button>
+      <input type="file" id="bgGoal1Input" accept="image/*" style="display:none">
+      <button id="bgGoal2Btn" class="txt">🥅 Fundo do gol 2</button>
+      <input type="file" id="bgGoal2Input" accept="image/*" style="display:none">
+      <button id="bgStand1Btn" class="txt">🏟️ Arquibancada 1</button>
+      <input type="file" id="bgStand1Input" accept="image/*" style="display:none">
+      <button id="bgStand2Btn" class="txt">🏟️ Arquibancada 2</button>
+      <input type="file" id="bgStand2Input" accept="image/*" style="display:none">
       <button id="bgRoofBtn" class="txt">🏛️ Fundo do teto</button>
       <input type="file" id="bgRoofInput" accept="image/*" style="display:none">
-    </div>
-    <div id="editStepBar" style="display:none;align-items:center;gap:10px;padding:8px 14px;background:#101010;border-bottom:1px solid #262626;">
-      <button id="editStepPrev" class="txt">◀</button>
-      <button id="editStepAdd" class="txt" style="background:#274a30;border-color:#3a7048;">➕ Nova etapa</button>
-      <button id="editStepDel" class="txt" style="background:#4a2a2a;border-color:#6a3a3a;">➖ Remover</button>
-      <span id="editStepLabel" style="font-size:14px;color:#ddd;font-weight:600;">Etapa 1/1</span>
-      <button id="editStepNext" class="txt">▶</button>
-      <span style="font-size:11px;color:#888;margin-left:auto;">arraste os jogadores/bola pra reposicionar</span>
+      <button id="bgBannerBtn" class="txt">🚩 Banner</button>
+      <input type="file" id="bgBannerInput" accept="image/*" style="display:none">
+      <div class="sep"></div>
+      <label class="txt" style="display:flex;align-items:center;gap:8px;cursor:pointer;">🎨 Cor da quadra
+        <input type="color" id="courtColorInput" value="#ffffff" style="width:34px;height:28px;border:none;background:none;padding:0;cursor:pointer;">
+      </label>
     </div>
     <div id="v3dCanvasWrap">
       <div class="hud">
@@ -853,68 +854,22 @@ function initThree(){
   });
   renderer.domElement.style.touchAction = 'none';
 
-  const raycaster = new THREE.Raycaster();
-  const groundPlane = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
-  function pointerToNDC(ev){
-    const rect = renderer.domElement.getBoundingClientRect();
-    return new THREE.Vector2(
-      ((ev.clientX-rect.left)/rect.width)*2-1,
-      -((ev.clientY-rect.top)/rect.height)*2+1
-    );
-  }
-  function groundHit(ev){
-    raycaster.setFromCamera(pointerToNDC(ev), three.camera);
-    const pt = new THREE.Vector3();
-    return raycaster.ray.intersectPlane(groundPlane, pt) ? pt : null;
-  }
-  function nearestEntityAtWorld(pt){
-    let best=null, bestD=1.3; // até 1.3m de tolerância
-    entities.forEach(e=>{
-      const pos = steps[currentStep].positions[e.id];
-      if(!pos) return;
-      const w = toWorld(pos.x,pos.y);
-      const d = Math.hypot(w.x-pt.x, w.z-pt.z);
-      if(d<bestD){ bestD=d; best=e; }
-    });
-    return best;
-  }
-
-  // ---- olhar livre (1ª pessoa) OU arrastar jogadores (modo editar de cima) ----
+  // ---- olhar livre: arraste na tela pra virar a cabeça, 360°, mesmo durante a reprodução ----
   let lookDrag = null;
-  let dragEntity = null;
   renderer.domElement.addEventListener('pointerdown', (ev)=>{
-    if(three && three.editMode){
-      const pt = groundHit(ev);
-      dragEntity = pt ? nearestEntityAtWorld(pt) : null;
-      renderer.domElement.setPointerCapture(ev.pointerId);
-      return;
-    }
     lookDrag = {x: ev.clientX, y: ev.clientY};
     renderer.domElement.setPointerCapture(ev.pointerId);
   });
   renderer.domElement.addEventListener('pointermove', (ev)=>{
-    if(!three) return;
-    if(three.editMode){
-      if(!dragEntity) return;
-      const pt = groundHit(ev);
-      if(!pt) return;
-      const f = fromWorld(pt);
-      f.x = Math.max(-0.03, Math.min(1.03, f.x));
-      f.y = Math.max(-0.03, Math.min(1.03, f.y));
-      const pos = steps[currentStep].positions[dragEntity.id];
-      pos.x = f.x; pos.y = f.y;
-      recomputeAutoFacing(currentStep);
-      return;
-    }
-    if(!lookDrag) return;
+    if(!lookDrag || !three) return;
     const dx = ev.clientX - lookDrag.x, dy = ev.clientY - lookDrag.y;
     lookDrag = {x: ev.clientX, y: ev.clientY};
     const sens = 0.0065;
     three.freeLookYaw = (three.freeLookYaw||0) - dx*sens;
     three.freeLookPitch = Math.max(-1.3, Math.min(1.3, (three.freeLookPitch||0) - dy*sens));
   });
-  renderer.domElement.addEventListener('pointerup', ()=>{ lookDrag = null; dragEntity = null; });
-  renderer.domElement.addEventListener('pointercancel', ()=>{ lookDrag = null; dragEntity = null; });
+  renderer.domElement.addEventListener('pointerup', ()=>{ lookDrag = null; });
+  renderer.domElement.addEventListener('pointercancel', ()=>{ lookDrag = null; });
 
   const camera = new THREE.PerspectiveCamera(72, wrap.clientWidth/wrap.clientHeight, 0.05, 300);
 
@@ -988,43 +943,55 @@ function initThree(){
   scene.add(buildBleachers(-1));
   const BLEACHER_DEPTH = 6*0.8 + 0.6; // até onde as fileiras vão
 
-  // ---- fundos: gol, arquibancada (mais além das fileiras) e teto ----
-  // ficam próximos da quadra, e quando uma foto é carregada a geometria é
-  // ajustada pra proporção real da imagem (sem esticar).
-  function buildBackdropPair(baseW, baseH, positionFn){
-    const matA = new THREE.MeshBasicMaterial({color:0x2a2a2a});
-    const matB = new THREE.MeshBasicMaterial({color:0x2a2a2a});
-    const meshA = new THREE.Mesh(new THREE.PlaneGeometry(baseW, baseH), matA);
-    const meshB = new THREE.Mesh(new THREE.PlaneGeometry(baseW, baseH), matB);
-    positionFn(meshA, meshB, baseH);
-    scene.add(meshA); scene.add(meshB);
-    return {mats:[matA,matB], baseW, baseH};
-  }
-  function buildBackdropSingle(baseW, baseH, positionFn){
-    const mat = new THREE.MeshBasicMaterial({color:0x1c1c1c, side:THREE.DoubleSide});
+  // ---- fundos: gol (2 lados independentes), arquibancada (2 lados
+  // independentes) e teto. Ficam próximos da quadra, e quando uma foto é
+  // carregada a geometria é ajustada pra proporção real da imagem (sem esticar).
+  function buildBackdropSingle(baseW, baseH, positionFn, color=0x2a2a2a){
+    const mat = new THREE.MeshBasicMaterial({color, side:THREE.DoubleSide});
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(baseW, baseH), mat);
     positionFn(mesh);
     scene.add(mesh);
-    return {mats:[mat], baseW, baseH};
+    return {segments:[{mat, baseW, baseH}]};
   }
 
-  const goalBackdrops = buildBackdropPair(COURT_WID+8, 11, (mA,mB,h)=>{
-    mA.position.set(HL+3.2, h/2-0.3, 0); mA.rotation.y = -Math.PI/2;
-    mB.position.set(-HL-3.2, h/2-0.3, 0); mB.rotation.y = Math.PI/2;
+  const goal1Backdrop = buildBackdropSingle(COURT_WID+8, 11, (m)=>{
+    m.position.set(HL+3.2, 11/2-0.3, 0); m.rotation.y = -Math.PI/2;
   });
-  const standBackdrops = buildBackdropPair(COURT_LEN+12, 12, (mA,mB,h)=>{
-    mA.position.set(0, h/2-0.3, HW+BLEACHER_DEPTH+2.5); mA.rotation.y = Math.PI;
-    mB.position.set(0, h/2-0.3, -HW-BLEACHER_DEPTH-2.5);
+  const goal2Backdrop = buildBackdropSingle(COURT_WID+8, 11, (m)=>{
+    m.position.set(-HL-3.2, 11/2-0.3, 0); m.rotation.y = Math.PI/2;
+  });
+  const stand1Backdrop = buildBackdropSingle(COURT_LEN+12, 12, (m)=>{
+    m.position.set(0, 12/2-0.3, HW+BLEACHER_DEPTH+2.5); m.rotation.y = Math.PI;
+  });
+  const stand2Backdrop = buildBackdropSingle(COURT_LEN+12, 12, (m)=>{
+    m.position.set(0, 12/2-0.3, -HW-BLEACHER_DEPTH-2.5);
   });
   const roofBackdrop = buildBackdropSingle(COURT_LEN+30, COURT_WID+30, (m)=>{
     m.position.set(0, 13.5, 0); m.rotation.x = Math.PI/2;
-  });
+  }, 0x1c1c1c);
+
+  // ---- banner: faixa baixa ao redor da quadra inteira (tipo placa de patrocínio) ----
+  const bannerH = 0.9;
+  const bannerSegments = [];
+  function addBannerSegment(w, x, z, rotY){
+    const mat = new THREE.MeshBasicMaterial({color:0x333333});
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, bannerH), mat);
+    m.position.set(x, bannerH/2+0.02, z); m.rotation.y = rotY;
+    scene.add(m);
+    bannerSegments.push({mat, baseW:w, baseH:bannerH});
+  }
+  addBannerSegment(COURT_LEN+0.6, 0, HW+0.15, Math.PI);
+  addBannerSegment(COURT_LEN+0.6, 0, -HW-0.15, 0);
+  addBannerSegment(COURT_WID+0.6, HL+0.15, 0, -Math.PI/2);
+  addBannerSegment(COURT_WID+0.6, -HL-0.15, 0, Math.PI/2);
+  const bannerBackdrop = { segments: bannerSegments };
 
   three = {
     scene, renderer, camera, wrap, meshes:{}, t:0, playing:true, speed:1,
     shakeSeed:Math.random()*1000, povId:null, lastFrame:performance.now(),
-    freeLookYaw:0, freeLookPitch:0, editMode:false, isRecording:false,
-    backdrops:{ goal:goalBackdrops, stand:standBackdrops, roof:roofBackdrop },
+    freeLookYaw:0, freeLookPitch:0, isRecording:false,
+    backdrops:{ goal1:goal1Backdrop, goal2:goal2Backdrop, stand1:stand1Backdrop, stand2:stand2Backdrop, roof:roofBackdrop, banner:bannerBackdrop },
+    courtMat,
     transition:null
   };
 
@@ -1078,46 +1045,10 @@ function startCameraTransition(){
   three.transition = {t0: performance.now(), fromPos: three.camera.position.clone(), fromQuat: three.camera.quaternion.clone()};
 }
 
-function stepStartTime(idx, durs){
-  durs = durs || allDurations();
-  let acc=0;
-  for(let i=0;i<idx && i<durs.length;i++) acc+=durs[i];
-  return acc;
-}
-
-function renderEditFrame(){
-  three.snap.entities.forEach(e=>{
-    const pos = steps[currentStep].positions[e.id];
-    if(!pos) return;
-    const mesh = three.meshes[e.id];
-    if(!mesh) return;
-    mesh.visible = true;
-    mesh.position.copy(toWorld(pos.x, pos.y));
-    if(e.team!=='ball'){
-      mesh.rotation.y = pos.facingAngle ?? -Math.PI/2;
-      const rig = mesh.userData.rig;
-      if(rig){
-        rig.legs[0].rotation.x = 0; rig.legs[1].rotation.x = 0;
-        rig.arms[0].rotation.x = 0; rig.arms[1].rotation.x = 0;
-        rig.torsoPivot.rotation.x = 0;
-      }
-    }
-  });
-  three.camera.position.set(0, 30, 0.001);
-  three.camera.up.set(0,0,-1);
-  three.camera.lookAt(0,0,0);
-  document.getElementById('editStepLabel').textContent = `Etapa ${currentStep+1}/${steps.length}`;
-}
-
 function animate3D(){
   if(!three) return;
   requestAnimationFrame(animate3D);
   try{
-    if(three.editMode){
-      renderEditFrame();
-      three.renderer.render(three.scene, three.camera);
-      return;
-    }
     const now = performance.now();
     const dt = Math.min((now-three.lastFrame)/1000, 0.05);
     three.lastFrame = now;
@@ -1251,9 +1182,6 @@ document.getElementById('goto3D').onclick = ()=>{
   }
   three.transition = null;
   three.freeLookYaw = 0; three.freeLookPitch = 0;
-  three.editMode = false;
-  document.getElementById('editStepBar').style.display = 'none';
-  document.getElementById('editTopBtn').textContent = '📐 Editar de cima';
   document.getElementById('viewer3DModeBadge').textContent = 'PRIMEIRA PESSOA';
   three.t = 0; three.playing = true;
   document.getElementById('play3DBtn').textContent = '⏸ Pausar';
@@ -1261,50 +1189,11 @@ document.getElementById('goto3D').onclick = ()=>{
 };
 document.getElementById('backTo2D').onclick = ()=>{
   three.playing = false;
-  three.editMode = false;
   if(three.povId!=null) selectedId = three.povId;
   document.getElementById('viewer3D').style.display = 'none';
   document.getElementById('editorScreen').style.display = 'flex';
   updateStepUI();
   layoutCanvas();
-};
-document.getElementById('editTopBtn').onclick = ()=>{
-  three.editMode = !three.editMode;
-  three.playing = false;
-  document.getElementById('editStepBar').style.display = three.editMode ? 'flex' : 'none';
-  document.getElementById('editTopBtn').textContent = three.editMode ? '🎥 Voltar 1ª pessoa' : '📐 Editar de cima';
-  document.getElementById('viewer3DModeBadge').textContent = three.editMode ? 'EDITANDO DE CIMA' : 'PRIMEIRA PESSOA';
-  if(three.editMode){
-    document.getElementById('editStepLabel').textContent = `Etapa ${currentStep+1}/${steps.length}`;
-  } else {
-    three.t = stepStartTime(currentStep);
-    three.transition = null;
-    three.freeLookYaw = 0; three.freeLookPitch = 0;
-    startCameraTransition();
-    three.playing = true;
-  }
-};
-document.getElementById('editStepPrev').onclick = ()=>{
-  if(currentStep>0) currentStep--;
-  document.getElementById('editStepLabel').textContent = `Etapa ${currentStep+1}/${steps.length}`;
-};
-document.getElementById('editStepNext').onclick = ()=>{
-  if(currentStep<steps.length-1) currentStep++;
-  document.getElementById('editStepLabel').textContent = `Etapa ${currentStep+1}/${steps.length}`;
-};
-document.getElementById('editStepAdd').onclick = ()=>{
-  const copy = {};
-  Object.keys(steps[currentStep].positions).forEach(id=>{ copy[id] = {...steps[currentStep].positions[id]}; });
-  steps.splice(currentStep+1, 0, {positions:copy});
-  currentStep++;
-  recomputeAutoFacing(currentStep);
-  document.getElementById('editStepLabel').textContent = `Etapa ${currentStep+1}/${steps.length}`;
-};
-document.getElementById('editStepDel').onclick = ()=>{
-  if(steps.length<=1) return;
-  steps.splice(currentStep,1);
-  currentStep = Math.min(currentStep, steps.length-1);
-  document.getElementById('editStepLabel').textContent = `Etapa ${currentStep+1}/${steps.length}`;
 };
 document.getElementById('povSelect').addEventListener('change', (e)=>{
   three.povId = parseInt(e.target.value);
@@ -1406,6 +1295,22 @@ document.getElementById('record3DBtn').onclick = ()=>{
   else startRecording();
 };
 
+function applySegmentTexture(seg, sourceTex, imgAspect){
+  const tex = sourceTex.clone();
+  tex.image = sourceTex.image;
+  tex.needsUpdate = true;
+  tex.encoding = THREE.sRGBEncoding;
+  tex.wrapS = THREE.ClampToEdgeWrapping; tex.wrapT = THREE.ClampToEdgeWrapping;
+  const panelAspect = seg.baseW / seg.baseH;
+  if(imgAspect > panelAspect){
+    const scale = panelAspect / imgAspect;
+    tex.repeat.set(scale, 1); tex.offset.set((1-scale)/2, 0);
+  } else {
+    const scale = imgAspect / panelAspect;
+    tex.repeat.set(1, scale); tex.offset.set(0, (1-scale)/2);
+  }
+  seg.mat.map = tex; seg.mat.color.set(0xffffff); seg.mat.needsUpdate = true;
+}
 function wireBackdropUpload(btnId, inputId, key){
   document.getElementById(btnId).onclick = ()=> document.getElementById(inputId).click();
   document.getElementById(inputId).addEventListener('change', (ev)=>{
@@ -1416,34 +1321,27 @@ function wireBackdropUpload(btnId, inputId, key){
       const img = new Image();
       img.onload = ()=>{
         const tex = new THREE.Texture(img);
-        tex.encoding = THREE.sRGBEncoding;
-        tex.anisotropy = three.renderer.capabilities.getMaxAnisotropy ? three.renderer.capabilities.getMaxAnisotropy() : 1;
         tex.needsUpdate = true;
-
-        const bd = three.backdrops[key];
         const imgAspect = img.naturalWidth / img.naturalHeight;
-        // mantém a altura do painel e ajusta a largura pela proporção real da
-        // foto, recortando o excesso via repeat pra preencher sem esticar
-        const panelAspect = bd.baseW / bd.baseH;
-        if(imgAspect > panelAspect){
-          const scale = panelAspect / imgAspect;
-          tex.repeat.set(scale, 1); tex.offset.set((1-scale)/2, 0);
-        } else {
-          const scale = imgAspect / panelAspect;
-          tex.repeat.set(1, scale); tex.offset.set(0, (1-scale)/2);
-        }
-        tex.wrapS = THREE.ClampToEdgeWrapping; tex.wrapT = THREE.ClampToEdgeWrapping;
-
-        [bd.mats].flat().forEach(mat=>{ mat.map = tex; mat.color.set(0xffffff); mat.needsUpdate = true; });
+        const bd = three.backdrops[key];
+        if(bd && bd.segments) bd.segments.forEach(seg=>applySegmentTexture(seg, tex, imgAspect));
       };
       img.src = e.target.result;
     };
     reader.readAsDataURL(file);
   });
 }
-wireBackdropUpload('bgGoalBtn','bgGoalInput','goal');
-wireBackdropUpload('bgStandBtn','bgStandInput','stand');
+wireBackdropUpload('bgGoal1Btn','bgGoal1Input','goal1');
+wireBackdropUpload('bgGoal2Btn','bgGoal2Input','goal2');
+wireBackdropUpload('bgStand1Btn','bgStand1Input','stand1');
+wireBackdropUpload('bgStand2Btn','bgStand2Input','stand2');
 wireBackdropUpload('bgRoofBtn','bgRoofInput','roof');
+wireBackdropUpload('bgBannerBtn','bgBannerInput','banner');
+
+document.getElementById('courtColorInput').addEventListener('input', (e)=>{
+  if(!three || !three.courtMat) return;
+  three.courtMat.color.set(e.target.value);
+});
 </script>
 </body>
 </html>
