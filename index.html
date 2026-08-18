@@ -104,6 +104,8 @@
       <select id="povSelect"></select>
     </div>
     <div id="bgToolbar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 14px;background:#101010;border-bottom:1px solid #262626;">
+      <button id="bgFloorBtn" class="txt">🪵 Foto do piso</button>
+      <input type="file" id="bgFloorInput" accept="image/*" style="display:none">
       <button id="bgGoal1Btn" class="txt">🥅 Fundo do gol 1</button>
       <input type="file" id="bgGoal1Input" accept="image/*" style="display:none">
       <button id="bgGoal2Btn" class="txt">🥅 Fundo do gol 2</button>
@@ -114,8 +116,10 @@
       <input type="file" id="bgStand2Input" accept="image/*" style="display:none">
       <button id="bgRoofBtn" class="txt">🏛️ Fundo do teto</button>
       <input type="file" id="bgRoofInput" accept="image/*" style="display:none">
-      <button id="bgBannerBtn" class="txt">🚩 Banner</button>
-      <input type="file" id="bgBannerInput" accept="image/*" style="display:none">
+      <button id="bgBanner1Btn" class="txt">🚩 Banner direita</button>
+      <input type="file" id="bgBanner1Input" accept="image/*" style="display:none">
+      <button id="bgBanner2Btn" class="txt">🚩 Banner esquerda</button>
+      <input type="file" id="bgBanner2Input" accept="image/*" style="display:none">
       <div class="sep"></div>
       <label class="txt" style="display:flex;align-items:center;gap:8px;cursor:pointer;">🎨 Cor da quadra
         <input type="color" id="courtColorInput" value="#ffffff" style="width:34px;height:28px;border:none;background:none;padding:0;cursor:pointer;">
@@ -1058,53 +1062,49 @@ function initThree(){
   const BLEACHER_DEPTH = 6*0.8 + 0.6; // até onde as fileiras vão
 
   // ---- fundos: gol (2 lados independentes), arquibancada (2 lados
-  // independentes) e teto. Ficam próximos da quadra, e quando uma foto é
-  // carregada a geometria é ajustada pra proporção real da imagem (sem esticar).
-  function buildBackdropSingle(baseW, baseH, positionFn, color=0x2a2a2a){
+  // independentes), teto e banners (2 lados). Ficam próximos da quadra, e
+  // quando uma foto é carregada a geometria é ajustada pra proporção real da
+  // imagem (sem esticar).
+  function buildBackdropSingle(baseW, baseH, positionFn, color=0x2a2a2a, startHidden=false){
     const mat = new THREE.MeshBasicMaterial({color, side:THREE.DoubleSide});
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(baseW, baseH), mat);
     positionFn(mesh);
+    mesh.visible = !startHidden;
     scene.add(mesh);
-    return {segments:[{mat, baseW, baseH}]};
+    return {segments:[{mat, baseW, baseH, mesh}]};
   }
 
   const goal1Backdrop = buildBackdropSingle(COURT_WID+8, 11, (m)=>{
-    m.position.set(HL+3.2, 11/2-0.3, 0); m.rotation.y = -Math.PI/2;
+    m.position.set(HL+1.8, 11/2-0.3, 0); m.rotation.y = -Math.PI/2;
   });
   const goal2Backdrop = buildBackdropSingle(COURT_WID+8, 11, (m)=>{
-    m.position.set(-HL-3.2, 11/2-0.3, 0); m.rotation.y = Math.PI/2;
+    m.position.set(-HL-1.8, 11/2-0.3, 0); m.rotation.y = Math.PI/2;
   });
   const stand1Backdrop = buildBackdropSingle(COURT_LEN+12, 12, (m)=>{
-    m.position.set(0, 12/2-0.3, HW+BLEACHER_DEPTH+2.5); m.rotation.y = Math.PI;
+    m.position.set(0, 12/2-0.3, HW+BLEACHER_DEPTH+1.2); m.rotation.y = Math.PI;
   });
   const stand2Backdrop = buildBackdropSingle(COURT_LEN+12, 12, (m)=>{
-    m.position.set(0, 12/2-0.3, -HW-BLEACHER_DEPTH-2.5);
+    m.position.set(0, 12/2-0.3, -HW-BLEACHER_DEPTH-1.2);
   });
   const roofBackdrop = buildBackdropSingle(COURT_LEN+30, COURT_WID+30, (m)=>{
     m.position.set(0, 13.5, 0); m.rotation.x = Math.PI/2;
   }, 0x1c1c1c);
 
-  // ---- banner: faixa baixa ao redor da quadra inteira (tipo placa de patrocínio) ----
+  // ---- banners: só nos 2 lados (não atrás do gol), invisíveis até você
+  // mandar uma foto — cada lado é independente.
   const bannerH = 0.9;
-  const bannerSegments = [];
-  function addBannerSegment(w, x, z, rotY){
-    const mat = new THREE.MeshBasicMaterial({color:0x333333});
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, bannerH), mat);
-    m.position.set(x, bannerH/2+0.02, z); m.rotation.y = rotY;
-    scene.add(m);
-    bannerSegments.push({mat, baseW:w, baseH:bannerH});
-  }
-  addBannerSegment(COURT_LEN+0.6, 0, HW+0.15, Math.PI);
-  addBannerSegment(COURT_LEN+0.6, 0, -HW-0.15, 0);
-  addBannerSegment(COURT_WID+0.6, HL+0.15, 0, -Math.PI/2);
-  addBannerSegment(COURT_WID+0.6, -HL-0.15, 0, Math.PI/2);
-  const bannerBackdrop = { segments: bannerSegments };
+  const banner1Backdrop = buildBackdropSingle(COURT_LEN+0.6, bannerH, (m)=>{
+    m.position.set(0, bannerH/2+0.02, HW+0.12); m.rotation.y = Math.PI;
+  }, 0x333333, true);
+  const banner2Backdrop = buildBackdropSingle(COURT_LEN+0.6, bannerH, (m)=>{
+    m.position.set(0, bannerH/2+0.02, -HW-0.12);
+  }, 0x333333, true);
 
   three = {
     scene, renderer, camera, wrap, meshes:{}, t:0, playing:true, speed:1,
     shakeSeed:Math.random()*1000, povId:null, lastFrame:performance.now(),
     freeLookYaw:0, freeLookPitch:0, isRecording:false,
-    backdrops:{ goal1:goal1Backdrop, goal2:goal2Backdrop, stand1:stand1Backdrop, stand2:stand2Backdrop, roof:roofBackdrop, banner:bannerBackdrop },
+    backdrops:{ goal1:goal1Backdrop, goal2:goal2Backdrop, stand1:stand1Backdrop, stand2:stand2Backdrop, roof:roofBackdrop, banner1:banner1Backdrop, banner2:banner2Backdrop },
     courtMat,
     transition:null
   };
@@ -1424,6 +1424,7 @@ function applySegmentTexture(seg, sourceTex, imgAspect){
     tex.repeat.set(1, scale); tex.offset.set(0, (1-scale)/2);
   }
   seg.mat.map = tex; seg.mat.color.set(0xffffff); seg.mat.needsUpdate = true;
+  if(seg.mesh) seg.mesh.visible = true; // banners só aparecem quando ganham uma foto
 }
 function wireBackdropUpload(btnId, inputId, key){
   document.getElementById(btnId).onclick = ()=> document.getElementById(inputId).click();
@@ -1450,7 +1451,32 @@ wireBackdropUpload('bgGoal2Btn','bgGoal2Input','goal2');
 wireBackdropUpload('bgStand1Btn','bgStand1Input','stand1');
 wireBackdropUpload('bgStand2Btn','bgStand2Input','stand2');
 wireBackdropUpload('bgRoofBtn','bgRoofInput','roof');
-wireBackdropUpload('bgBannerBtn','bgBannerInput','banner');
+wireBackdropUpload('bgBanner1Btn','bgBanner1Input','banner1');
+wireBackdropUpload('bgBanner2Btn','bgBanner2Input','banner2');
+
+// ---- foto do piso: substitui a madeira procedural pela foto real da quadra ----
+document.getElementById('bgFloorBtn').onclick = ()=> document.getElementById('bgFloorInput').click();
+document.getElementById('bgFloorInput').addEventListener('change', (ev)=>{
+  const file = ev.target.files[0];
+  if(!file || !three) return;
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const tex = new THREE.Texture(img);
+      tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(6,3);
+      tex.encoding = THREE.sRGBEncoding;
+      tex.needsUpdate = true;
+      three.courtMat.map = tex;
+      three.courtMat.color.set(0xffffff);
+      document.getElementById('courtColorInput').value = '#ffffff';
+      three.courtMat.needsUpdate = true;
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+});
 
 document.getElementById('courtColorInput').addEventListener('input', (e)=>{
   if(!three || !three.courtMat) return;
