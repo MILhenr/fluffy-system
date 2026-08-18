@@ -33,6 +33,18 @@
   #scrub{flex:1;min-width:80px;accent-color:#8899cc;}
   .hint{font-size:10.5px;color:#777;padding:0 14px 5px;background:#151515;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .editPop{position:absolute;background:#1e1e1e;border:1px solid #444;border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:6px;z-index:20;box-shadow:0 4px 18px rgba(0,0,0,.5);}
+  .modalOverlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:100;padding:20px;box-sizing:border-box;}
+  .modalCard{background:#1c1c1c;border:1px solid #3a3a3a;border-radius:14px;padding:18px;max-width:360px;width:100%;max-height:75vh;overflow-y:auto;}
+  .modalCard h3{margin:0 0 12px;font-size:15px;color:#eee;}
+  .modalCard input[type=text]{width:100%;background:#111;border:1px solid #3a3a3a;color:#eee;padding:10px;border-radius:8px;font-size:14px;box-sizing:border-box;margin-bottom:12px;}
+  .modalBtnRow{display:flex;gap:8px;justify-content:flex-end;margin-top:6px;}
+  .modalBtnRow button{background:#2c4270;border:1px solid #3d5a95;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;cursor:pointer;}
+  .modalBtnRow button.secondary{background:#2a2a2a;border-color:#444;}
+  .movementItem{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #2a2a2a;gap:8px;}
+  .movementItem .mname{font-size:13.5px;color:#eee;}
+  .movementItem .mdate{color:#777;font-size:11px;display:block;}
+  .movementItem button{background:#2c4270;border:1px solid #3d5a95;color:#fff;padding:8px 12px;border-radius:8px;font-size:12.5px;cursor:pointer;flex-shrink:0;}
+  .movementItem button.del{background:#4a2a2a;border-color:#6a3a3a;}
   .editPop input{background:#111;border:1px solid #3a3a3a;color:#eee;padding:5px 7px;border-radius:5px;font-size:13px;width:120px;}
   .editPop .row{display:flex;gap:6px;}
   .editPop button{background:#3a5a8a;border:none;color:#fff;padding:5px 10px;border-radius:5px;font-size:12px;cursor:pointer;}
@@ -58,6 +70,8 @@
       <button id="play2DTop" class="iconbtn"><span class="ic">▶️</span>2D</button>
       <div class="sep"></div>
       <button id="saveBtn" class="iconbtn primary"><span class="ic">💾</span>Salvar</button>
+      <button id="saveMovementBtn" class="iconbtn primary"><span class="ic">🏃</span>Salvar jogada</button>
+      <button id="loadMovementBtn" class="iconbtn"><span class="ic">📂</span>Jogadas</button>
       <button id="goto3D" class="iconbtn primary"><span class="ic">🎬</span>Ver 3D</button>
       <span id="status"></span>
     </div>
@@ -630,6 +644,106 @@ async function loadBoard(){
   }catch(e){}
 }
 document.getElementById('saveBtn').onclick = saveBoard;
+
+// ---------------------------------------------------------------------------
+// JOGADAS SALVAS (biblioteca com nome, permanente — diferente do "Salvar"
+// rápido acima, que só guarda um rascunho único).
+// ---------------------------------------------------------------------------
+function openModal(innerHTML){
+  const overlay = document.createElement('div');
+  overlay.className = 'modalOverlay';
+  overlay.innerHTML = `<div class="modalCard">${innerHTML}</div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
+  return overlay;
+}
+
+document.getElementById('saveMovementBtn').onclick = ()=>{
+  const overlay = openModal(`
+    <h3>Salvar jogada</h3>
+    <input type="text" id="movementNameInput" placeholder="Nome da jogada (ex: Contra-ataque 1)">
+    <div class="modalBtnRow">
+      <button class="secondary" id="movementCancelBtn">Cancelar</button>
+      <button id="movementConfirmBtn">Salvar</button>
+    </div>`);
+  document.getElementById('movementCancelBtn').onclick = ()=> overlay.remove();
+  document.getElementById('movementNameInput').focus();
+  document.getElementById('movementConfirmBtn').onclick = async ()=>{
+    const nameInput = document.getElementById('movementNameInput').value.trim();
+    const name = nameInput || `Jogada ${new Date().toLocaleString('pt-BR')}`;
+    const key = 'movement:'+Date.now();
+    const data = JSON.stringify({name, entities, steps, nextBlueNum, nextRedNum, savedAt: Date.now()});
+    const btn = document.getElementById('movementConfirmBtn');
+    btn.textContent = 'Salvando...'; btn.disabled = true;
+    try{
+      await window.storage.set(key, data, false);
+      overlay.remove();
+      const status = document.getElementById('status');
+      status.textContent = '✓ jogada salva';
+      setTimeout(()=>status.textContent='', 2000);
+    }catch(e){
+      console.error(e);
+      btn.textContent = 'Erro — tentar de novo'; btn.disabled = false;
+    }
+  };
+};
+
+document.getElementById('loadMovementBtn').onclick = async ()=>{
+  const overlay = openModal(`<h3>Jogadas salvas</h3><div id="movementListArea" style="color:#999;font-size:13px;">Carregando...</div>
+    <div class="modalBtnRow"><button class="secondary" id="movementListCloseBtn">Fechar</button></div>`);
+  document.getElementById('movementListCloseBtn').onclick = ()=> overlay.remove();
+  const area = document.getElementById('movementListArea');
+  try{
+    const listRes = await window.storage.list('movement:', false);
+    const keys = (listRes && listRes.keys) || [];
+    if(keys.length===0){ area.textContent = 'Nenhuma jogada salva ainda.'; return; }
+    const items = [];
+    for(const k of keys){
+      try{
+        const r = await window.storage.get(k, false);
+        if(r && r.value) items.push({key:k, data: JSON.parse(r.value)});
+      }catch(e){}
+    }
+    items.sort((a,b)=> (b.data.savedAt||0)-(a.data.savedAt||0));
+    area.innerHTML = '';
+    if(items.length===0){ area.textContent = 'Nenhuma jogada salva ainda.'; return; }
+    items.forEach(item=>{
+      const row = document.createElement('div');
+      row.className = 'movementItem';
+      const dateStr = item.data.savedAt ? new Date(item.data.savedAt).toLocaleDateString('pt-BR') : '';
+      const stepCount = (item.data.steps||[]).length;
+      row.innerHTML = `<div><span class="mname">${item.data.name || 'Sem nome'}</span><span class="mdate">${stepCount} etapas · ${dateStr}</span></div>
+        <div style="display:flex;gap:6px;">
+          <button class="loadBtn">Carregar</button>
+          <button class="del">🗑</button>
+        </div>`;
+      row.querySelector('.loadBtn').onclick = ()=>{
+        entities = item.data.entities || [];
+        steps = (item.data.steps && item.data.steps.length) ? item.data.steps : [{positions:{}}];
+        currentStep = 0;
+        nextBlueNum = item.data.nextBlueNum || 1; nextRedNum = item.data.nextRedNum || 1;
+        idCounter = Math.max(1, ...entities.map(e=>e.id+1), 1);
+        document.getElementById('addBall').disabled = !!entities.find(e=>e.team==='ball');
+        recomputeAllStepsAutoFacing();
+        updateStepUI(); draw(); refreshPovSelect();
+        overlay.remove();
+      };
+      row.querySelector('.del').onclick = async (ev)=>{
+        const delBtn = ev.currentTarget;
+        if(delBtn.dataset.confirming!=='1'){
+          delBtn.textContent = 'Confirmar?';
+          delBtn.dataset.confirming = '1';
+          return;
+        }
+        try{ await window.storage.delete(item.key, false); row.remove(); }catch(e){ console.error(e); }
+      };
+      area.appendChild(row);
+    });
+  }catch(e){
+    console.error(e);
+    area.textContent = 'Erro ao carregar as jogadas salvas.';
+  }
+};
 
 // ---------------------------------------------------------------------------
 // REPRODUÇÃO 2D (pré-visualização de todas as etapas em sequência)
