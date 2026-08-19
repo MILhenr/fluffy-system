@@ -1062,10 +1062,35 @@ function initThree(){
   addLine([[0,-HW],[0,HW]]);
   const cpts=[]; for(let i=0;i<=64;i++){const a=i/64*Math.PI*2; cpts.push(new THREE.Vector3(Math.cos(a)*3,0.02,Math.sin(a)*3));}
   scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(cpts), new THREE.LineBasicMaterial({color:0x999999})));
-  addLine([[HL-4,-HW+4],[HL,-HW+4],[HL,HW-4],[HL-4,HW-4]]);
-  addLine([[-HL+4,-HW+4],[-HL,-HW+4],[-HL,HW-4],[-HL+4,HW-4]]);
-  addLine([[HL,-3],[HL,3]],0xdddddd);
-  addLine([[-HL,-3],[-HL,3]],0xdddddd);
+
+  // área de meta oficial: dois arcos de 6m de raio (centrados em cada poste),
+  // ligados por uma reta — não é um retângulo.
+  function arcPts(cx, cz, r, a0, a1, n){
+    const pts = [];
+    for(let i=0;i<=n;i++){ const a = a0+(a1-a0)*(i/n); pts.push([cx+Math.cos(a)*r, cz+Math.sin(a)*r]); }
+    return pts;
+  }
+  function goalAreaLine(xSign){
+    const r = 6, postZ = 1.5, n = 14;
+    const arcA = arcPts(0, -postZ, r, -Math.PI/2, -Math.PI, n);   // poste em z=-1.5
+    const arcB = arcPts(0, postZ, r, Math.PI/2, Math.PI, n);      // poste em z=+1.5
+    const local = [...arcA, ...arcB.slice().reverse()];
+    return local.map(([lx,lz])=>[xSign*(HL+lx), lz]);
+  }
+  addLine(goalAreaLine(1));
+  addLine(goalAreaLine(-1));
+
+  // marca do pênalti (6m da linha de gol) e do segundo pênalti (10m)
+  [1,-1].forEach(xSign=>{
+    [6,10].forEach(dist=>{
+      const p = new THREE.Mesh(new THREE.CircleGeometry(0.06,12), new THREE.MeshBasicMaterial({color:0xdddddd}));
+      p.rotation.x = -Math.PI/2; p.position.set(xSign*(HL-dist), 0.021, 0);
+      scene.add(p);
+    });
+  });
+
+  addLine([[HL,-1.5],[HL,1.5]],0xdddddd);
+  addLine([[-HL,-1.5],[-HL,1.5]],0xdddddd);
 
   // gol simples (postes + travessão)
   function buildGoalFrame(xSign){
@@ -1102,24 +1127,16 @@ function initThree(){
   }
   function buildBench(zSign){
     const group = new THREE.Group();
-    const benchMat = new THREE.MeshLambertMaterial({color:0x3a2a1a});
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(6, 0.5, 0.8), benchMat);
-    seat.position.set(0, 0.25, zSign*(HW+0.9));
-    seat.castShadow = true; seat.receiveShadow = true;
-    group.add(seat);
-    const backrest = new THREE.Mesh(new THREE.BoxGeometry(6, 0.85, 0.06), benchMat);
-    backrest.position.set(0, 0.65, zSign*(HW+0.9+zSign*0.37));
-    group.add(backrest);
-    const roofMat = new THREE.MeshLambertMaterial({color:0x1e3a5f});
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.08, 1.5), roofMat);
-    roof.position.set(0, 2.15, zSign*(HW+0.9));
-    roof.castShadow = true;
-    group.add(roof);
-    const poleMat = new THREE.MeshLambertMaterial({color:0x555555});
-    [-2.9,2.9].forEach(x=>{
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,2.1,6), poleMat);
-      pole.position.set(x, 1.1, zSign*(HW+0.9));
-      group.add(pole);
+    const benchMatBlue = new THREE.MeshLambertMaterial({color:0x2e4a7a});
+    const benchMatRed = new THREE.MeshLambertMaterial({color:0x7a2e2e});
+    [[-7, benchMatBlue],[7, benchMatRed]].forEach(([xOff, mat])=>{
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.5, 0.8), mat);
+      seat.position.set(xOff, 0.25, zSign*(HW+0.9));
+      seat.castShadow = true; seat.receiveShadow = true;
+      group.add(seat);
+      const backrest = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.85, 0.06), mat);
+      backrest.position.set(xOff, 0.65, zSign*(HW+0.9+zSign*0.37));
+      group.add(backrest);
     });
     return group;
   }
