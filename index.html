@@ -125,6 +125,15 @@
         <input type="color" id="courtColorInput" value="#ffffff" style="width:34px;height:28px;border:none;background:none;padding:0;cursor:pointer;">
       </label>
     </div>
+    <div id="sideToolbar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 14px;background:#101010;border-bottom:1px solid #262626;">
+      <span style="color:#999;font-size:12px;">Lado 1:</span>
+      <button id="toggleStand1" class="txt primary">🏟️ Arquibancada</button>
+      <button id="toggleBench1" class="txt">💺 Banco</button>
+      <div class="sep"></div>
+      <span style="color:#999;font-size:12px;">Lado 2:</span>
+      <button id="toggleStand2" class="txt primary">🏟️ Arquibancada</button>
+      <button id="toggleBench2" class="txt">💺 Banco</button>
+    </div>
     <div id="v3dCanvasWrap">
       <div class="hud">
         <div class="badge">RECONSTRUÇÃO 3D · gerada a partir da prancha tática</div>
@@ -162,7 +171,7 @@
    steps: sequência de "capturas" — cada etapa guarda a posição (fração 0..1)
    e o ângulo de olhar de cada entidade naquele momento da jogada
    ========================================================================= */
-const COURT_LEN = 52, COURT_WID = 24;
+const COURT_LEN = 40, COURT_WID = 20; // medida oficial FIFA de futsal
 const MIN_SPEED = 1.4, MAX_SPEED = 7.5, MIN_STEP_DURATION = 0.28;
 const BALL_SPEED = 13.5; // m/s constante — a bola sempre viaja nessa velocidade,
                          // nunca fica mais lenta só porque um jogador correu
@@ -621,19 +630,50 @@ document.getElementById('stepSlider').addEventListener('input',(e)=>{
 // ---------------------------------------------------------------------------
 // SALVAR / CARREGAR
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Camada de armazenamento: usa window.storage (do Claude) quando disponível;
+// se não (por exemplo rodando sozinho no Railway/servidor próprio), usa o
+// localStorage do próprio navegador — assim salvar funciona nos dois lugares.
+// ---------------------------------------------------------------------------
+const hasClaudeStorage = (typeof window.storage !== 'undefined') && window.storage && typeof window.storage.set === 'function';
+async function storageSet(key, value){
+  if(hasClaudeStorage) return window.storage.set(key, value, false);
+  localStorage.setItem(key, value);
+  return {key, value};
+}
+async function storageGet(key){
+  if(hasClaudeStorage) return window.storage.get(key, false);
+  const v = localStorage.getItem(key);
+  return v===null ? null : {key, value:v};
+}
+async function storageDelete(key){
+  if(hasClaudeStorage) return window.storage.delete(key, false);
+  localStorage.removeItem(key);
+  return {key, deleted:true};
+}
+async function storageList(prefix){
+  if(hasClaudeStorage) return window.storage.list(prefix, false);
+  const keys = [];
+  for(let i=0;i<localStorage.length;i++){
+    const k = localStorage.key(i);
+    if(k && (!prefix || k.startsWith(prefix))) keys.push(k);
+  }
+  return {keys, prefix};
+}
+
 const STORAGE_KEY = 'tactics_board_v2';
 async function saveBoard(){
   const status = document.getElementById('status');
   try{
     const data = JSON.stringify({entities, steps, nextBlueNum, nextRedNum});
-    const res = await window.storage.set(STORAGE_KEY, data, false);
+    const res = await storageSet(STORAGE_KEY, data);
     status.textContent = res ? '✓ salvo' : 'falha ao salvar';
     setTimeout(()=>status.textContent='', 2000);
-  }catch(e){ status.textContent = 'erro ao salvar'; console.error(e); }
+  }catch(e){ status.textContent = 'erro: ' + (e && e.message ? e.message : 'salvar'); console.error(e); }
 }
 async function loadBoard(){
   try{
-    const res = await window.storage.get(STORAGE_KEY, false);
+    const res = await storageGet(STORAGE_KEY);
     if(res && res.value){
       const data = JSON.parse(res.value);
       entities = data.entities || [];
@@ -680,14 +720,15 @@ document.getElementById('saveMovementBtn').onclick = ()=>{
     const btn = document.getElementById('movementConfirmBtn');
     btn.textContent = 'Salvando...'; btn.disabled = true;
     try{
-      await window.storage.set(key, data, false);
+      await storageSet(key, data);
       overlay.remove();
       const status = document.getElementById('status');
       status.textContent = '✓ jogada salva';
       setTimeout(()=>status.textContent='', 2000);
     }catch(e){
       console.error(e);
-      btn.textContent = 'Erro — tentar de novo'; btn.disabled = false;
+      btn.textContent = 'Erro: ' + (e && e.message ? e.message : 'tentar de novo');
+      btn.disabled = false;
     }
   };
 };
@@ -698,13 +739,13 @@ document.getElementById('loadMovementBtn').onclick = async ()=>{
   document.getElementById('movementListCloseBtn').onclick = ()=> overlay.remove();
   const area = document.getElementById('movementListArea');
   try{
-    const listRes = await window.storage.list('movement:', false);
+    const listRes = await storageList('movement:');
     const keys = (listRes && listRes.keys) || [];
     if(keys.length===0){ area.textContent = 'Nenhuma jogada salva ainda.'; return; }
     const items = [];
     for(const k of keys){
       try{
-        const r = await window.storage.get(k, false);
+        const r = await storageGet(k);
         if(r && r.value) items.push({key:k, data: JSON.parse(r.value)});
       }catch(e){}
     }
@@ -739,7 +780,7 @@ document.getElementById('loadMovementBtn').onclick = async ()=>{
           delBtn.dataset.confirming = '1';
           return;
         }
-        try{ await window.storage.delete(item.key, false); row.remove(); }catch(e){ console.error(e); }
+        try{ await storageDelete(item.key); row.remove(); }catch(e){ console.error(e); }
       };
       area.appendChild(row);
     });
@@ -1043,7 +1084,9 @@ function initThree(){
   scene.add(buildGoalFrame(1));
   scene.add(buildGoalFrame(-1));
 
-  // ---- arquibancada de verdade (fileiras), dos dois lados ----
+  // ---- arquibancada de verdade (fileiras), dos dois lados — cada lado pode
+  // ser ligado/desligado independente, e cada lado também pode ter um banco
+  // de reservas em vez de (ou junto com) a arquibancada.
   function buildBleachers(zSign){
     const rows = 6, rowH = 0.42, rowD = 0.8;
     const seatMat = new THREE.MeshLambertMaterial({color:0x2c2c2c});
@@ -1057,8 +1100,38 @@ function initThree(){
     }
     return group;
   }
-  scene.add(buildBleachers(1));
-  scene.add(buildBleachers(-1));
+  function buildBench(zSign){
+    const group = new THREE.Group();
+    const benchMat = new THREE.MeshLambertMaterial({color:0x3a2a1a});
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(6, 0.5, 0.8), benchMat);
+    seat.position.set(0, 0.25, zSign*(HW+0.9));
+    seat.castShadow = true; seat.receiveShadow = true;
+    group.add(seat);
+    const backrest = new THREE.Mesh(new THREE.BoxGeometry(6, 0.85, 0.06), benchMat);
+    backrest.position.set(0, 0.65, zSign*(HW+0.9+zSign*0.37));
+    group.add(backrest);
+    const roofMat = new THREE.MeshLambertMaterial({color:0x1e3a5f});
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.08, 1.5), roofMat);
+    roof.position.set(0, 2.15, zSign*(HW+0.9));
+    roof.castShadow = true;
+    group.add(roof);
+    const poleMat = new THREE.MeshLambertMaterial({color:0x555555});
+    [-2.9,2.9].forEach(x=>{
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,2.1,6), poleMat);
+      pole.position.set(x, 1.1, zSign*(HW+0.9));
+      group.add(pole);
+    });
+    return group;
+  }
+  const bleachers1 = buildBleachers(1);
+  const bleachers2 = buildBleachers(-1);
+  scene.add(bleachers1);
+  scene.add(bleachers2);
+  const bench1 = buildBench(1);
+  const bench2 = buildBench(-1);
+  bench1.visible = false; bench2.visible = false; // começam desligados
+  scene.add(bench1);
+  scene.add(bench2);
   const BLEACHER_DEPTH = 6*0.8 + 0.6; // até onde as fileiras vão
 
   // ---- fundos: gol (2 lados independentes), arquibancada (2 lados
@@ -1105,6 +1178,7 @@ function initThree(){
     shakeSeed:Math.random()*1000, povId:null, lastFrame:performance.now(),
     freeLookYaw:0, freeLookPitch:0, isRecording:false,
     backdrops:{ goal1:goal1Backdrop, goal2:goal2Backdrop, stand1:stand1Backdrop, stand2:stand2Backdrop, roof:roofBackdrop, banner1:banner1Backdrop, banner2:banner2Backdrop },
+    sideExtras:{ bleachers1, bleachers2, bench1, bench2 },
     courtMat,
     transition:null
   };
@@ -1482,6 +1556,21 @@ document.getElementById('courtColorInput').addEventListener('input', (e)=>{
   if(!three || !three.courtMat) return;
   three.courtMat.color.set(e.target.value);
 });
+
+function wireSideToggle(btnId, meshKey){
+  const btn = document.getElementById(btnId);
+  btn.addEventListener('click', ()=>{
+    if(!three || !three.sideExtras) return;
+    const mesh = three.sideExtras[meshKey];
+    const nowOn = !mesh.visible;
+    mesh.visible = nowOn;
+    btn.classList.toggle('primary', nowOn);
+  });
+}
+wireSideToggle('toggleStand1','bleachers1');
+wireSideToggle('toggleStand2','bleachers2');
+wireSideToggle('toggleBench1','bench1');
+wireSideToggle('toggleBench2','bench2');
 </script>
 </body>
 </html>
