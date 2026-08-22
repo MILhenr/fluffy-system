@@ -80,6 +80,7 @@
       <button id="stepDel" class="txt">➖ Remover</button>
       <span id="stepLabel">Etapa 1/1</span>
       <input type="range" id="stepSlider" min="0" max="0" step="1" value="0">
+      <button id="highPassBtn" class="txt" style="display:none;">🏹 Passe alto</button>
       <button id="clearSteps" class="iconbtn warn" style="width:44px;height:44px;flex-shrink:0;" title="Limpar etapas"><span class="ic" style="font-size:16px;">🧹</span></button>
       <button id="clearAll" class="iconbtn warn" style="width:44px;height:44px;flex-shrink:0;" title="Nova prancha"><span class="ic" style="font-size:16px;">🗂️</span></button>
     </div>
@@ -172,7 +173,7 @@
    steps: sequência de "capturas" — cada etapa guarda a posição (fração 0..1)
    e o ângulo de olhar de cada entidade naquele momento da jogada
    ========================================================================= */
-const COURT_LEN = 42, COURT_WID = 26; // fora do padrão oficial (mais larga), por pedido
+const COURT_LEN = 62, COURT_WID = 38; // bem maior, fora do padrão oficial, por pedido
 const MIN_SPEED = 1.6, MAX_SPEED = 9.2, MIN_STEP_DURATION = 0.07;
 const BALL_SPEED = 12.5; // m/s constante — a bola sempre viaja nessa velocidade,
                          // nunca fica mais lenta só porque um jogador correu
@@ -294,7 +295,15 @@ function sampleEntityAt(id, t, durs, isBall){
       // interpolação linear — sem suavizar/desacelerar em cada etapa, pra não
       // criar aquele instante de "pausa" ao chegar em cada uma (futsal é contínuo).
       const ue = u;
-      return { x:a.x+(b.x-a.x)*ue, y:a.y+(b.y-a.y)*ue, facingAngle: lerpAngle(a.facingAngle||0, b.facingAngle||0, ue) };
+      let height = 0;
+      if(isBall && b.highPass){
+        // passe alto: sobe em arco de parábola; quanto maior a distância
+        // percorrida, mais alto o voo (realista)
+        const distM = entityStepDist(i, id);
+        const peak = Math.min(distM*0.32, 9);
+        height = peak * 4*ue*(1-ue);
+      }
+      return { x:a.x+(b.x-a.x)*ue, y:a.y+(b.y-a.y)*ue, facingAngle: lerpAngle(a.facingAngle||0, b.facingAngle||0, ue), height };
     }
     acc += dur;
   }
@@ -407,6 +416,19 @@ function draw(){
     const pos = steps[currentStep].positions[e.id];
     drawEntityAt(e, pos, false);
   });
+  updateHighPassBtnVisibility();
+}
+function updateHighPassBtnVisibility(){
+  const btn = document.getElementById('highPassBtn');
+  if(!btn) return;
+  const ball = entities.find(e=>e.team==='ball');
+  if(ball && selectedId===ball.id && currentStep>0 && steps[currentStep].positions[ball.id]){
+    btn.style.display = '';
+    const pos = steps[currentStep].positions[ball.id];
+    btn.classList.toggle('primary', !!pos.highPass);
+  } else {
+    btn.style.display = 'none';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -539,17 +561,19 @@ function recomputeAllStepsAutoFacing(){
 function addEntityToAllSteps(id, pos){
   steps.forEach(st=>{ if(!st.positions[id]) st.positions[id] = {x:pos.x, y:pos.y, facingAngle:pos.facingAngle, customFacing:false}; });
 }
+function randomHeightM(){ return 1.70 + Math.random()*0.10; } // 1.70 a 1.80m
+
 function populateBaseSquad(){
   const blueXs = [0.2,0.4,0.6,0.8];
   const redXs = [0.2,0.4,0.6,0.8];
   blueXs.forEach(x=>{
     const id = idCounter++;
-    entities.push({id, team:'blue', number:nextBlueNum++, name:''});
+    entities.push({id, team:'blue', number:nextBlueNum++, name:'', heightM:randomHeightM()});
     addEntityToAllSteps(id, {x, y:0.22, facingAngle:-Math.PI/2});
   });
   redXs.forEach(x=>{
     const id = idCounter++;
-    entities.push({id, team:'red', number:nextRedNum++, name:''});
+    entities.push({id, team:'red', number:nextRedNum++, name:'', heightM:randomHeightM()});
     addEntityToAllSteps(id, {x, y:0.78, facingAngle:Math.PI/2});
   });
   recomputeAllStepsAutoFacing();
@@ -557,7 +581,7 @@ function populateBaseSquad(){
 document.getElementById('addBlue').onclick = ()=>{
   const id = idCounter++;
   const pos = {x:0.5+Math.random()*0.1-0.05, y:0.35, facingAngle:-Math.PI/2};
-  entities.push({id, team:'blue', number:nextBlueNum++, name:''});
+  entities.push({id, team:'blue', number:nextBlueNum++, name:'', heightM:randomHeightM()});
   addEntityToAllSteps(id, pos);
   recomputeAllStepsAutoFacing();
   draw(); refreshPovSelect();
@@ -565,7 +589,7 @@ document.getElementById('addBlue').onclick = ()=>{
 document.getElementById('addRed').onclick = ()=>{
   const id = idCounter++;
   const pos = {x:0.5+Math.random()*0.1-0.05, y:0.6, facingAngle:Math.PI/2};
-  entities.push({id, team:'red', number:nextRedNum++, name:''});
+  entities.push({id, team:'red', number:nextRedNum++, name:'', heightM:randomHeightM()});
   addEntityToAllSteps(id, pos);
   recomputeAllStepsAutoFacing();
   draw(); refreshPovSelect();
@@ -578,6 +602,14 @@ document.getElementById('addBall').onclick = ()=>{
   recomputeAllStepsAutoFacing();
   document.getElementById('addBall').disabled = true;
   draw();
+};
+document.getElementById('highPassBtn').onclick = ()=>{
+  const ball = entities.find(e=>e.team==='ball');
+  if(!ball || currentStep===0) return;
+  const pos = steps[currentStep].positions[ball.id];
+  if(!pos) return;
+  pos.highPass = !pos.highPass;
+  updateHighPassBtnVisibility();
 };
 document.getElementById('clearSteps').onclick = ()=>{
   const keep = {};
@@ -860,13 +892,15 @@ function fromWorld(v){
 
 function buildSnapshot(){
   return {
-    entities: entities.map(e=>({id:e.id, team:e.team, number:e.number, name:e.name}))
+    entities: entities.map(e=>({id:e.id, team:e.team, number:e.number, name:e.name, heightM:e.heightM}))
   };
 }
 function sample3D(id, t, durs, isBall){
   const p = sampleEntityAt(id, t, durs, isBall);
   if(!p) return null;
-  return { pos: toWorld(p.x,p.y), facingAngle: p.facingAngle ?? -Math.PI/2 };
+  const pos = toWorld(p.x,p.y);
+  if(p.height) pos.y = p.height;
+  return { pos, facingAngle: p.facingAngle ?? -Math.PI/2 };
 }
 function velocity3D(id, t, dt=0.05, durs, isBall){
   const a = sample3D(id, Math.max(0,t-dt), durs, isBall), b = sample3D(id, t+dt, durs, isBall);
@@ -950,7 +984,7 @@ function makeSoccerBallTexture(){
   return tex;
 }
 
-function makePlayerMesh(team, numberText){
+function makePlayerMesh(team, numberText, heightM){
   const g = new THREE.Group();
   const color = team==='blue' ? 0x3a5fd0 : team==='red' ? 0xc0392b : 0xaaaaaa;
   const mat = new THREE.MeshLambertMaterial({color});
@@ -1003,7 +1037,9 @@ function makePlayerMesh(team, numberText){
   }
   g.userData.rig = {torsoPivot, legs, arms, knees, elbows};
   g.traverse(o=>{ if(o.isMesh){ o.castShadow = true; } });
-  g.scale.setScalar(1.4);
+  // altura do modelo sem escala ≈ 1.625m (até o topo da cabeça); escala pra
+  // bater com a altura real sorteada pra esse jogador (1.70-1.80m)
+  g.scale.setScalar((heightM || 1.75) / 1.625);
   return g;
 }
 
@@ -1236,7 +1272,7 @@ function rebuild3DScene(){
       three.scene.add(ballMesh);
       three.meshes[e.id] = ballMesh;
     } else {
-      const mesh = makePlayerMesh(e.team, e.number);
+      const mesh = makePlayerMesh(e.team, e.number, e.heightM || randomHeightM());
       three.scene.add(mesh);
       three.meshes[e.id] = mesh;
     }
