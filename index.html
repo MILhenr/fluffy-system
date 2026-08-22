@@ -171,9 +171,9 @@
    steps: sequência de "capturas" — cada etapa guarda a posição (fração 0..1)
    e o ângulo de olhar de cada entidade naquele momento da jogada
    ========================================================================= */
-const COURT_LEN = 42, COURT_WID = 22; // máximo oficial permitido pela FIFA (faixa: 38-42 x 18-22)
-const MIN_SPEED = 1.4, MAX_SPEED = 7.5, MIN_STEP_DURATION = 0.28;
-const BALL_SPEED = 13.5; // m/s constante — a bola sempre viaja nessa velocidade,
+const COURT_LEN = 42, COURT_WID = 26; // fora do padrão oficial (mais larga), por pedido
+const MIN_SPEED = 1.6, MAX_SPEED = 9.2, MIN_STEP_DURATION = 0.2;
+const BALL_SPEED = 16.5; // m/s constante — a bola sempre viaja nessa velocidade,
                          // nunca fica mais lenta só porque um jogador correu
                          // muito no mesmo intervalo.
 
@@ -192,7 +192,7 @@ let court = {x:0,y:0,w:0,h:0};
 function layoutCanvas(){
   const availW = stage.clientWidth - 4;
   const availH = stage.clientHeight - 4;
-  const aspect = 0.52;
+  const aspect = COURT_WID/COURT_LEN;
   let h = availH, w = h*aspect;
   if(w>availW){ w = availW; h = w/aspect; }
   canvas.width = w; canvas.height = h;
@@ -249,6 +249,8 @@ function entityStepDist(i, id){
   const dx=(b.x-a.x)*COURT_WID, dy=(b.y-a.y)*COURT_LEN;
   return Math.hypot(dx,dy);
 }
+const PACE_MULTIPLIER = 0.55; // deixa TUDO mais rápido/dinâmico, independente do que estava dominando o tempo da etapa
+
 function segmentDuration(i){
   const ballEnt = entities.find(e=>e.team==='ball');
   let maxLen = 0;
@@ -261,7 +263,7 @@ function segmentDuration(i){
     const ballLen = entityStepDist(i, ballEnt.id);
     if(ballLen>0.02) dur = Math.max(dur, ballLen/BALL_SPEED);
   }
-  return dur;
+  return Math.max(dur * PACE_MULTIPLIER, 0.12);
 }
 function allDurations(){ const d=[]; for(let i=0;i<steps.length-1;i++) d.push(segmentDuration(i)); return d; }
 function totalDuration(durs){ durs = durs || allDurations(); return durs.reduce((a,b)=>a+b,0) || 0.01; }
@@ -283,7 +285,7 @@ function sampleEntityAt(id, t, durs, isBall){
         // segmento for mais longo (porque um jogador demorou mais), ela chega
         // no destino antes e só espera lá — nunca "arrasta" mais devagar.
         const L = entityStepDist(i, id);
-        const travel = L>0.02 ? L/BALL_SPEED : 0;
+        const travel = L>0.02 ? (L/BALL_SPEED)*PACE_MULTIPLIER : 0;
         u = travel>0 ? Math.max(0,Math.min(1,(t-acc)/travel)) : 1;
       } else {
         u = dur>0 ? Math.max(0,Math.min(1,(t-acc)/dur)) : 1;
@@ -956,9 +958,9 @@ function makePlayerMesh(team, numberText){
   const torsoPivot = new THREE.Group();
   torsoPivot.position.y = 0.72;
   g.add(torsoPivot);
-  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.19,0.24,0.62,10), mat);
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.19,0.6,10), mat);
   torso.position.y = 0.31; torsoPivot.add(torso);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.15,12,10), skinMat);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.135,12,10), skinMat);
   head.position.y = 0.77; torsoPivot.add(head);
 
   if(numberText){
@@ -972,22 +974,35 @@ function makePlayerMesh(team, numberText){
     torsoPivot.add(back);
   }
 
-  const legs = [], arms = [];
+  const legs = [], arms = [], knees = [], elbows = [];
   for(const s of [-1,1]){
     const legPivot = new THREE.Group();
     legPivot.position.set(s*0.11, 0.72, 0);
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.075,0.06,0.72,8), mat);
-    leg.position.y = -0.36; legPivot.add(leg);
-    g.add(legPivot); legs.push(legPivot);
+    const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.062,0.054,0.38,8), mat);
+    thigh.position.y = -0.19; legPivot.add(thigh);
+    const kneePivot = new THREE.Group();
+    kneePivot.position.set(0,-0.38,0);
+    legPivot.add(kneePivot);
+    const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.048,0.04,0.36,8), mat);
+    shin.position.y = -0.18; kneePivot.add(shin);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.075,0.045,0.15), mat);
+    foot.position.set(0,-0.36,0.04); kneePivot.add(foot);
+    g.add(legPivot); legs.push(legPivot); knees.push(kneePivot);
 
     const armPivot = new THREE.Group();
     armPivot.position.set(s*0.24, 0.56, 0);
-    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.055,0.045,0.55,8), mat);
-    arm.position.y = -0.275; armPivot.add(arm);
-    torsoPivot.add(armPivot); arms.push(armPivot);
+    const upperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.041,0.3,8), mat);
+    upperArm.position.y = -0.15; armPivot.add(upperArm);
+    const elbowPivot = new THREE.Group();
+    elbowPivot.position.set(0,-0.3,0);
+    armPivot.add(elbowPivot);
+    const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.037,0.032,0.27,8), mat);
+    forearm.position.y = -0.135; elbowPivot.add(forearm);
+    torsoPivot.add(armPivot); arms.push(armPivot); elbows.push(elbowPivot);
   }
-  g.userData.rig = {torsoPivot, legs, arms};
+  g.userData.rig = {torsoPivot, legs, arms, knees, elbows};
   g.traverse(o=>{ if(o.isMesh){ o.castShadow = true; } });
+  g.scale.setScalar(1.4);
   return g;
 }
 
@@ -1312,17 +1327,29 @@ function render3DFrame(tt, dur, durs){
       mesh.rotation.y = spd>0.3 ? Math.atan2(v.x, v.z) : s.facingAngle;
       const rig = mesh.userData.rig;
       if(rig){
-        const spdFrac = Math.min(spd/7.5, 1);
-        const freq = 1.6 + spdFrac*4.2;
-        const amp = 0.12 + spdFrac*0.62;
+        const spdFrac = Math.min(spd/9.2, 1);
+        const freq = 1.7 + spdFrac*3.0;
+        const amp = 0.14 + spdFrac*0.7;
         const phase = tt*freq*Math.PI*2 + (e.id*1.7);
         const swing = Math.sin(phase);
         rig.legs[0].rotation.x = swing*amp;
         rig.legs[1].rotation.x = -swing*amp;
-        rig.arms[0].rotation.x = -swing*amp*0.75;
-        rig.arms[1].rotation.x = swing*amp*0.75;
-        rig.torsoPivot.rotation.x = spdFrac*0.22;
-        mesh.position.y += Math.abs(Math.cos(phase))*spdFrac*0.035;
+        rig.arms[0].rotation.x = -swing*amp*0.8;
+        rig.arms[1].rotation.x = swing*amp*0.8;
+        rig.torsoPivot.rotation.x = spdFrac*0.24;
+        rig.torsoPivot.rotation.y = swing*0.13*spdFrac; // torção do tronco, contrária às pernas
+        rig.torsoPivot.position.x = Math.cos(phase)*0.025*spdFrac; // leve balanço do quadril
+        mesh.position.y += Math.abs(Math.cos(phase))*spdFrac*0.05;
+
+        // joelhos e cotovelos dobram de verdade, com curva mais "chicoteada"
+        // (não linear) pra parecer leve e orgânico, não mecânico
+        const kneeBase = 0.1;
+        const kneeAmp = spdFrac*1.9;
+        rig.knees[0].rotation.x = kneeBase + Math.pow(Math.max(0, Math.sin(phase)), 1.3)*kneeAmp;
+        rig.knees[1].rotation.x = kneeBase + Math.pow(Math.max(0, -Math.sin(phase)), 1.3)*kneeAmp;
+        const elbowAmp = 0.25 + spdFrac*0.7;
+        rig.elbows[0].rotation.x = 0.28 + Math.pow(Math.max(0, -swing), 1.2)*elbowAmp;
+        rig.elbows[1].rotation.x = 0.28 + Math.pow(Math.max(0, swing), 1.2)*elbowAmp;
       }
     }
   });
@@ -1331,15 +1358,15 @@ function render3DFrame(tt, dur, durs){
   if(povEntity && povSample){
     const s = povSample;
     const v = povVel;
-    const speedA = Math.min(v.length(), 9);
+    const speedA = Math.min(v.length(), 11);
     const eyeHeight = 1.68;
     const basePos = s.pos.clone(); basePos.y = eyeHeight;
 
-    const spdFrac = Math.min(speedA/7.5, 1);
-    const bobFreq = 1.8 + spdFrac*2.2;
+    const spdFrac = Math.min(speedA/9.2, 1);
+    const bobFreq = 1.9 + spdFrac*2.6;
     const phase = tt*bobFreq*Math.PI*2 + three.shakeSeed;
-    const bobAmt = 0.03 + spdFrac*0.10;
-    const swayAmt = 0.012 + spdFrac*0.038;
+    const bobAmt = 0.03 + spdFrac*0.22;
+    const swayAmt = 0.012 + spdFrac*0.075;
     basePos.y += Math.sin(phase)*bobAmt;
     basePos.x += Math.cos(phase*0.5)*swayAmt;
 
@@ -1349,7 +1376,7 @@ function render3DFrame(tt, dur, durs){
     // a cabeça arrastando na tela (olhar livre, 360°, mesmo durante o lance).
     const yaw = s.facingAngle + (three.freeLookYaw||0);
     const dir = new THREE.Vector3(Math.sin(yaw), 0, -Math.cos(yaw));
-    const pitch = Math.max(-1.3, Math.min(1.3, -0.03 - Math.min(speedA,6)*0.032 + (three.freeLookPitch||0)));
+    const pitch = Math.max(-1.3, Math.min(1.3, -0.03 - Math.min(speedA,8)*0.03 + (three.freeLookPitch||0)));
     const target = basePos.clone().add(dir.multiplyScalar(5));
     target.y = basePos.y + Math.tan(pitch)*5;
     three.camera.up.set(0,1,0);
