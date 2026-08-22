@@ -172,8 +172,8 @@
    e o ângulo de olhar de cada entidade naquele momento da jogada
    ========================================================================= */
 const COURT_LEN = 42, COURT_WID = 26; // fora do padrão oficial (mais larga), por pedido
-const MIN_SPEED = 1.6, MAX_SPEED = 9.2, MIN_STEP_DURATION = 0.2;
-const BALL_SPEED = 16.5; // m/s constante — a bola sempre viaja nessa velocidade,
+const MIN_SPEED = 1.6, MAX_SPEED = 9.2, MIN_STEP_DURATION = 0.07;
+const BALL_SPEED = 12.5; // m/s constante — a bola sempre viaja nessa velocidade,
                          // nunca fica mais lenta só porque um jogador correu
                          // muito no mesmo intervalo.
 
@@ -263,7 +263,7 @@ function segmentDuration(i){
     const ballLen = entityStepDist(i, ballEnt.id);
     if(ballLen>0.02) dur = Math.max(dur, ballLen/BALL_SPEED);
   }
-  return Math.max(dur * PACE_MULTIPLIER, 0.12);
+  return Math.max(dur * PACE_MULTIPLIER, 0.04);
 }
 function allDurations(){ const d=[]; for(let i=0;i<steps.length-1;i++) d.push(segmentDuration(i)); return d; }
 function totalDuration(durs){ durs = durs || allDurations(); return durs.reduce((a,b)=>a+b,0) || 0.01; }
@@ -1314,6 +1314,8 @@ function showViewer3DError(){
 
 function render3DFrame(tt, dur, durs){
   let povSample = null, povVel = null;
+  const ballEntPre = three.snap.entities.find(x=>x.team==='ball');
+  const ballPosNow = ballEntPre ? sample3D(ballEntPre.id, tt, durs, true) : null;
   three.snap.entities.forEach(e=>{
     const s = sample3D(e.id, tt, durs, e.team==='ball');
     if(!s) return;
@@ -1336,7 +1338,13 @@ function render3DFrame(tt, dur, durs){
         rig.legs[1].rotation.x = -swing*amp;
         rig.arms[0].rotation.x = -swing*amp*0.7;
         rig.arms[1].rotation.x = swing*amp*0.7;
-        rig.torsoPivot.rotation.x = spdFrac*0.22;
+        // olha pra baixo (inclina a cabeça/tronco) quando a bola está pertinho, pra ver ela
+        let ballTilt = 0;
+        if(ballPosNow){
+          const distToBall = Math.hypot(ballPosNow.pos.x-s.pos.x, ballPosNow.pos.z-s.pos.z);
+          ballTilt = Math.max(0, 1 - distToBall/2.2) * 0.5;
+        }
+        rig.torsoPivot.rotation.x = spdFrac*0.22 + ballTilt;
         rig.torsoPivot.rotation.y = swing*0.06*spdFrac; // leve torção do tronco, contrária às pernas
         mesh.position.y += Math.abs(Math.cos(phase))*spdFrac*0.04;
 
@@ -1375,7 +1383,15 @@ function render3DFrame(tt, dur, durs){
     // a cabeça arrastando na tela (olhar livre, 360°, mesmo durante o lance).
     const yaw = s.facingAngle + (three.freeLookYaw||0);
     const dir = new THREE.Vector3(Math.sin(yaw), 0, -Math.cos(yaw));
-    const pitch = Math.max(-1.3, Math.min(1.3, -0.03 - Math.min(speedA,8)*0.03 + (three.freeLookPitch||0)));
+    let pitch = -0.03 - Math.min(speedA,8)*0.03 + (three.freeLookPitch||0);
+
+    // quando a bola está pertinho do jogador, ele olha mais pra baixo, pro chão, pra ver ela
+    if(ballPosNow){
+      const distToBall = Math.hypot(ballPosNow.pos.x-s.pos.x, ballPosNow.pos.z-s.pos.z);
+      const closeness = Math.max(0, 1 - distToBall/2.2);
+      pitch -= closeness*0.4;
+    }
+    pitch = Math.max(-1.3, Math.min(1.3, pitch));
     const target = basePos.clone().add(dir.multiplyScalar(5));
     target.y = basePos.y + Math.tan(pitch)*5;
     three.camera.up.set(0,1,0);
