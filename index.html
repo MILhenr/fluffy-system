@@ -173,7 +173,7 @@
    steps: sequência de "capturas" — cada etapa guarda a posição (fração 0..1)
    e o ângulo de olhar de cada entidade naquele momento da jogada
    ========================================================================= */
-const COURT_LEN = 46, COURT_WID = 28; // um pouco maior que o oficial, sem exagero
+const COURT_LEN = 42, COURT_WID = 23; // pouco acima do oficial
 const MIN_SPEED = 1.6, MAX_SPEED = 9.2, MIN_STEP_DURATION = 0.07;
 const BALL_SPEED = 12.5; // m/s constante — a bola sempre viaja nessa velocidade,
                          // nunca fica mais lenta só porque um jogador correu
@@ -1351,8 +1351,6 @@ function showViewer3DError(){
 
 function render3DFrame(tt, dur, durs){
   let povSample = null, povVel = null;
-  const ballEntPre = three.snap.entities.find(x=>x.team==='ball');
-  const ballPosNow = ballEntPre ? sample3D(ballEntPre.id, tt, durs, true) : null;
   three.snap.entities.forEach(e=>{
     const s = sample3D(e.id, tt, durs, e.team==='ball');
     if(!s) return;
@@ -1375,13 +1373,7 @@ function render3DFrame(tt, dur, durs){
         rig.legs[1].rotation.x = -swing*amp;
         rig.arms[0].rotation.x = -swing*amp*0.7;
         rig.arms[1].rotation.x = swing*amp*0.7;
-        // olha pra baixo (inclina a cabeça/tronco) quando a bola está pertinho, pra ver ela
-        let ballTilt = 0;
-        if(ballPosNow){
-          const distToBall = Math.hypot(ballPosNow.pos.x-s.pos.x, ballPosNow.pos.z-s.pos.z);
-          ballTilt = Math.max(0, 1 - distToBall/3.2) * 0.65;
-        }
-        rig.torsoPivot.rotation.x = spdFrac*0.22 + ballTilt;
+        rig.torsoPivot.rotation.x = spdFrac*0.22;
         rig.torsoPivot.rotation.y = swing*0.06*spdFrac; // leve torção do tronco, contrária às pernas
         mesh.position.y += Math.abs(Math.cos(phase))*spdFrac*0.04;
 
@@ -1422,12 +1414,6 @@ function render3DFrame(tt, dur, durs){
     const dir = new THREE.Vector3(Math.sin(yaw), 0, -Math.cos(yaw));
     let pitch = -0.03 - Math.min(speedA,8)*0.03 + (three.freeLookPitch||0);
 
-    // quando a bola está pertinho do jogador, ele olha mais pra baixo, pro chão, pra ver ela
-    if(ballPosNow){
-      const distToBall = Math.hypot(ballPosNow.pos.x-s.pos.x, ballPosNow.pos.z-s.pos.z);
-      const closeness = Math.max(0, 1 - distToBall/3.2);
-      pitch -= closeness*0.55;
-    }
     pitch = Math.max(-1.3, Math.min(1.3, pitch));
     const target = basePos.clone().add(dir.multiplyScalar(5));
     target.y = basePos.y + Math.tan(pitch)*5;
