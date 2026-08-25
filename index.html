@@ -45,6 +45,8 @@
   .movementItem .mdate{color:#777;font-size:11px;display:block;}
   .movementItem button{background:#2c4270;border:1px solid #3d5a95;color:#fff;padding:8px 12px;border-radius:8px;font-size:12.5px;cursor:pointer;flex-shrink:0;}
   .movementItem button.del{background:#4a2a2a;border-color:#6a3a3a;}
+  .ctrlBtn{width:56px;height:56px;border-radius:14px;background:rgba(30,30,30,0.75);border:1px solid rgba(255,255,255,0.25);color:#fff;font-size:22px;-webkit-user-select:none;user-select:none;touch-action:none;}
+  .ctrlBtn:active{background:rgba(60,60,60,0.9);}
   .editPop input{background:#111;border:1px solid #3a3a3a;color:#eee;padding:5px 7px;border-radius:5px;font-size:13px;width:120px;}
   .editPop .row{display:flex;gap:6px;}
   .editPop button{background:#3a5a8a;border:none;color:#fff;padding:5px 10px;border-radius:5px;font-size:12px;cursor:pointer;}
@@ -72,6 +74,9 @@
       <button id="saveBtn" class="iconbtn primary"><span class="ic">💾</span>Salvar</button>
       <button id="saveMovementBtn" class="iconbtn primary"><span class="ic">🏃</span>Salvar jogada</button>
       <button id="loadMovementBtn" class="iconbtn"><span class="ic">📂</span>Jogadas</button>
+      <div class="sep"></div>
+      <button id="randomBtn" class="iconbtn warn"><span class="ic">🎲</span>ALEATÓRIO</button>
+      <button id="randomPlayBtn" class="iconbtn warn"><span class="ic">⚔️</span>ALEATÓRIO JOGADA</button>
       <button id="goto3D" class="iconbtn primary"><span class="ic">🎬</span>Ver 3D</button>
       <span id="status"></span>
     </div>
@@ -103,6 +108,8 @@
       <div class="sep"></div>
       <span style="font-size:13.5px;color:#999;">Visão do jogador:</span>
       <select id="povSelect"></select>
+      <div class="sep"></div>
+      <button id="controlModeBtn" class="txt primary">🎮 Controlar</button>
     </div>
     <div id="bgToolbar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 14px;background:#101010;border-bottom:1px solid #262626;">
       <button id="bgFloorBtn" class="txt">🪵 Foto do piso</button>
@@ -125,6 +132,9 @@
       <label class="txt" style="display:flex;align-items:center;gap:8px;cursor:pointer;">🎨 Cor da quadra
         <input type="color" id="courtColorInput" value="#ffffff" style="width:34px;height:28px;border:none;background:none;padding:0;cursor:pointer;">
       </label>
+      <div class="sep"></div>
+      <button id="saveEnvBtn" class="txt primary">💾 Salvar ambiente</button>
+      <button id="loadEnvBtn" class="txt">📂 Ambientes</button>
     </div>
     <div id="sideToolbar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 14px;background:#101010;border-bottom:1px solid #262626;">
       <span style="color:#999;font-size:12px;">Lado 1:</span>
@@ -139,6 +149,20 @@
       <div class="hud">
         <div class="badge">RECONSTRUÇÃO 3D · gerada a partir da prancha tática</div>
         <div class="badge" id="viewer3DModeBadge">PRIMEIRA PESSOA</div>
+      </div>
+      <div id="controlPad" style="display:none;position:absolute;left:0;right:0;bottom:16px;justify-content:space-between;align-items:flex-end;padding:0 16px;pointer-events:none;">
+        <div style="display:grid;grid-template-columns:56px 56px 56px;grid-template-rows:56px 56px 56px;gap:6px;pointer-events:auto;">
+          <div></div>
+          <button id="moveFwdBtn" class="ctrlBtn">⬆</button>
+          <div></div>
+          <button id="moveLeftBtn" class="ctrlBtn">◀</button>
+          <div></div>
+          <button id="moveRightBtn" class="ctrlBtn">▶</button>
+          <div></div>
+          <button id="moveBackBtn" class="ctrlBtn">⬇</button>
+          <div></div>
+        </div>
+        <button id="passBtn" style="pointer-events:auto;width:88px;height:88px;border-radius:50%;background:#2c7a3f;border:2px solid #4aa862;color:#fff;font-size:14px;font-weight:700;">⚡<br>Passe</button>
       </div>
     </div>
     <div id="bottombar" style="flex-direction:column;align-items:stretch;gap:8px;padding-bottom:max(18px, env(safe-area-inset-bottom));">
@@ -724,6 +748,121 @@ async function loadBoard(){
 }
 document.getElementById('saveBtn').onclick = saveBoard;
 
+document.getElementById('randomBtn').onclick = ()=>{
+  const ball = entities.find(e=>e.team==='ball');
+  entities.forEach(e=>{
+    if(e.team==='ball') return;
+    const pos = steps[currentStep].positions[e.id];
+    if(pos){
+      pos.x = 0.08 + Math.random()*0.84;
+      pos.y = 0.08 + Math.random()*0.84;
+    }
+  });
+  if(ball){
+    const bp = steps[currentStep].positions[ball.id];
+    if(bp){ bp.x = 0.5; bp.y = 0.5; }
+  }
+  recomputeAutoFacing(currentStep);
+  const myPlayer = entities.find(e=>e.team==='blue') || entities.find(e=>e.team!=='ball');
+  if(myPlayer) selectedId = myPlayer.id;
+  draw();
+
+  // vai direto pro 3D já no modo de controle, pra conduzir o jogador
+  document.getElementById('goto3D').click();
+  if(three && !three.controlMode) document.getElementById('controlModeBtn').click();
+};
+
+document.getElementById('randomPlayBtn').onclick = ()=>{
+  let ball = entities.find(e=>e.team==='ball');
+  if(!ball){
+    const id = idCounter++;
+    ball = {id, team:'ball', number:'', name:''};
+    entities.push(ball);
+  }
+  const blues = entities.filter(e=>e.team==='blue');
+  const reds = entities.filter(e=>e.team==='red');
+  if(blues.length===0 || reds.length===0){
+    alert('Precisa ter pelo menos 1 jogador azul e 1 vermelho em quadra pra gerar a jogada.');
+    return;
+  }
+
+  const clamp01 = v => Math.max(0.05, Math.min(0.95, v));
+
+  // reseta pra uma etapa inicial: azul no próprio campo atacando pra y=0 (o
+  // gol), vermelho posicionado como defesa entre o azul e o gol.
+  steps = [{positions:{}}];
+  currentStep = 0;
+  blues.forEach((e,i)=>{
+    const x = blues.length>1 ? 0.15 + (i/(blues.length-1))*0.7 : 0.5;
+    steps[0].positions[e.id] = {x: clamp01(x+(Math.random()-0.5)*0.06), y: clamp01(0.78+Math.random()*0.1), facingAngle:-Math.PI/2, customFacing:false};
+  });
+  reds.forEach((e,i)=>{
+    const x = reds.length>1 ? 0.15 + (i/(reds.length-1))*0.7 : 0.5;
+    steps[0].positions[e.id] = {x: clamp01(x+(Math.random()-0.5)*0.06), y: clamp01(0.28+Math.random()*0.12), facingAngle:Math.PI/2, customFacing:false};
+  });
+
+  // sorteia quem vai carregar a bola — esse é o jogador que você vai controlar
+  const carrier = blues[Math.floor(Math.random()*blues.length)];
+  steps[0].positions[ball.id] = {x: steps[0].positions[carrier.id].x, y: clamp01(steps[0].positions[carrier.id].y-0.03)};
+
+  const NUM_STEPS = 6;
+  for(let s=1; s<=NUM_STEPS; s++){
+    const prev = steps[s-1].positions;
+    const next = {};
+
+    // o portador avança em direção ao gol, com leve drible lateral
+    const cp = prev[carrier.id];
+    const advance = 0.085 + Math.random()*0.06;
+    const drift = (Math.random()-0.5)*0.12;
+    const cx = clamp01(cp.x + drift);
+    const cy = clamp01(cp.y - advance);
+    next[carrier.id] = {x:cx, y:cy, facingAngle:cp.facingAngle, customFacing:false};
+    next[ball.id] = {x:cx, y:clamp01(cy+0.02)};
+
+    // apoio: os outros atacantes avançam junto, se espalhando pra abrir espaço
+    blues.forEach(e=>{
+      if(e.id===carrier.id) return;
+      const p = prev[e.id];
+      const adv = 0.05 + Math.random()*0.06;
+      const lateral = (Math.random()-0.5)*0.06;
+      next[e.id] = {x:clamp01(p.x+lateral), y:clamp01(p.y-adv), facingAngle:p.facingAngle, customFacing:false};
+    });
+
+    // defesa: o mais próximo fecha marcação em cima do portador, os outros recompõem
+    let nearest = null, nearestDist = Infinity;
+    reds.forEach(e=>{
+      const p = prev[e.id];
+      const d = Math.hypot(p.x-cx, p.y-cy);
+      if(d<nearestDist){ nearestDist=d; nearest=e; }
+    });
+    reds.forEach(e=>{
+      const p = prev[e.id];
+      let tx, ty;
+      if(nearest && e.id===nearest.id){
+        const closeFactor = 0.55; // fecha em cima, mas não gruda 100%
+        tx = p.x + (cx-p.x)*closeFactor;
+        ty = p.y + (cy-p.y)*closeFactor;
+      } else {
+        tx = p.x + (Math.random()-0.5)*0.05;
+        ty = p.y - 0.015 + Math.random()*0.03; // recompõe, cobrindo espaço
+      }
+      next[e.id] = {x:clamp01(tx), y:clamp01(ty), facingAngle:p.facingAngle, customFacing:false};
+    });
+
+    steps.push({positions:next});
+  }
+
+  recomputeAllStepsAutoFacing();
+  currentStep = 0;
+  selectedId = carrier.id;
+  updateStepUI();
+  draw();
+
+  // vai pro 3D e já deixa reproduzindo a jogada — você entra no "🎮 Controlar"
+  // quando quiser assumir a decisão
+  document.getElementById('goto3D').click();
+};
+
 // ---------------------------------------------------------------------------
 // JOGADAS SALVAS (biblioteca com nome, permanente — diferente do "Salvar"
 // rápido acima, que só guarda um rascunho único).
@@ -750,7 +889,7 @@ document.getElementById('saveMovementBtn').onclick = ()=>{
   document.getElementById('movementConfirmBtn').onclick = async ()=>{
     const nameInput = document.getElementById('movementNameInput').value.trim();
     const name = nameInput || `Jogada ${new Date().toLocaleString('pt-BR')}`;
-    const key = 'movement:'+Date.now();
+    const key = 'movement_'+Date.now();
     const data = JSON.stringify({name, entities, steps, nextBlueNum, nextRedNum, savedAt: Date.now()});
     const btn = document.getElementById('movementConfirmBtn');
     btn.textContent = 'Salvando...'; btn.disabled = true;
@@ -774,7 +913,7 @@ document.getElementById('loadMovementBtn').onclick = async ()=>{
   document.getElementById('movementListCloseBtn').onclick = ()=> overlay.remove();
   const area = document.getElementById('movementListArea');
   try{
-    const listRes = await storageList('movement:');
+    const listRes = await storageList('movement_');
     const keys = (listRes && listRes.keys) || [];
     if(keys.length===0){ area.textContent = 'Nenhuma jogada salva ainda.'; return; }
     const items = [];
@@ -989,6 +1128,15 @@ function makePlayerMesh(team, numberText, heightM){
   const color = team==='blue' ? 0x3a5fd0 : team==='red' ? 0xc0392b : 0xaaaaaa;
   const mat = new THREE.MeshLambertMaterial({color});
   const skinMat = new THREE.MeshLambertMaterial({color:0xd8a878});
+  const shortsMat = new THREE.MeshLambertMaterial({color:0xf2f2f2});
+  const shoeMat = new THREE.MeshLambertMaterial({color:0x161616});
+
+  // sombra de contato — dá a sensação de peso real no chão
+  const shadowMat = new THREE.MeshBasicMaterial({color:0x000000, transparent:true, opacity:0.32, depthWrite:false});
+  const shadowBlob = new THREE.Mesh(new THREE.CircleGeometry(0.32,16), shadowMat);
+  shadowBlob.rotation.x = -Math.PI/2;
+  shadowBlob.position.y = 0.015;
+  g.add(shadowBlob);
 
   const torsoPivot = new THREE.Group();
   torsoPivot.position.y = 0.72;
@@ -1013,14 +1161,20 @@ function makePlayerMesh(team, numberText, heightM){
   for(const s of [-1,1]){
     const legPivot = new THREE.Group();
     legPivot.position.set(s*0.11, 0.72, 0);
-    const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.062,0.054,0.38,8), mat);
-    thigh.position.y = -0.19; legPivot.add(thigh);
+    // calção
+    const shorts = new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.063,0.14,8), shortsMat);
+    shorts.position.y = -0.07; legPivot.add(shorts);
+    // coxa (pele)
+    const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.054,0.26,8), skinMat);
+    thigh.position.y = -0.27; legPivot.add(thigh);
     const kneePivot = new THREE.Group();
     kneePivot.position.set(0,-0.38,0);
     legPivot.add(kneePivot);
+    // meião (cor do time)
     const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.048,0.04,0.36,8), mat);
     shin.position.y = -0.18; kneePivot.add(shin);
-    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.075,0.045,0.15), mat);
+    // chuteira
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.075,0.045,0.15), shoeMat);
     foot.position.set(0,-0.36,0.04); kneePivot.add(foot);
     g.add(legPivot); legs.push(legPivot); knees.push(kneePivot);
 
@@ -1031,7 +1185,7 @@ function makePlayerMesh(team, numberText, heightM){
     const elbowPivot = new THREE.Group();
     elbowPivot.position.set(0,-0.3,0);
     armPivot.add(elbowPivot);
-    const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.037,0.032,0.27,8), mat);
+    const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.037,0.032,0.27,8), skinMat);
     forearm.position.y = -0.135; elbowPivot.add(forearm);
     torsoPivot.add(armPivot); arms.push(armPivot); elbows.push(elbowPivot);
   }
@@ -1049,11 +1203,14 @@ function initThree(){
   scene.background = new THREE.Color(0x1b1b1b);
   scene.fog = new THREE.Fog(0x1b1b1b, 40, 130);
   const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
   renderer.setSize(wrap.clientWidth, wrap.clientHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.gammaFactor = 2.2;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.15;
   wrap.appendChild(renderer.domElement);
   renderer.domElement.addEventListener('webglcontextlost', (ev)=>{
     ev.preventDefault();
@@ -1246,6 +1403,8 @@ function initThree(){
     scene, renderer, camera, wrap, meshes:{}, t:0, playing:true, speed:1,
     shakeSeed:Math.random()*1000, povId:null, lastFrame:performance.now(),
     freeLookYaw:0, freeLookPitch:0, isRecording:false,
+    controlMode:false, manualPos:null, manualYaw:0, manualBallPos:null, passAnim:null, frozenPositions:{},
+    envImages:{},
     backdrops:{ goal1:goal1Backdrop, goal2:goal2Backdrop, stand1:stand1Backdrop, stand2:stand2Backdrop, roof:roofBackdrop, banner1:banner1Backdrop, banner2:banner2Backdrop },
     sideExtras:{ bleachers1, bleachers2, bench1, bench2 },
     courtMat,
@@ -1309,6 +1468,11 @@ function animate3D(){
     const now = performance.now();
     const dt = Math.min((now-three.lastFrame)/1000, 0.05);
     three.lastFrame = now;
+    if(three.controlMode){
+      renderControlFrame(dt);
+      three.renderer.render(three.scene, three.camera);
+      return;
+    }
     const durs = allDurations();
     const dur = totalDuration(durs);
     if(three.playing){
@@ -1331,6 +1495,79 @@ function animate3D(){
   }catch(err){
     console.error('Erro no render 3D:', err);
     showViewer3DError();
+  }
+}
+
+let moveInput = {fwd:false, back:false, left:false, right:false};
+
+function renderControlFrame(dt){
+  const povEntity = three.snap.entities.find(e=>e.id===three.povId);
+  if(!povEntity || !three.manualPos) return;
+
+  const runSpeed = 6.5;
+  const yaw = three.manualYaw + (three.freeLookYaw||0);
+  const fwdDir = new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));
+  const rightDir = new THREE.Vector3(Math.sin(yaw+Math.PI/2),0,-Math.cos(yaw+Math.PI/2));
+
+  const moveVec = new THREE.Vector3();
+  if(moveInput.fwd) moveVec.add(fwdDir);
+  if(moveInput.back) moveVec.sub(fwdDir);
+  if(moveInput.right) moveVec.add(rightDir);
+  if(moveInput.left) moveVec.sub(rightDir);
+  let speed = 0;
+  if(moveVec.lengthSq()>0){
+    moveVec.normalize();
+    three.manualPos.add(moveVec.multiplyScalar(runSpeed*dt));
+    speed = runSpeed;
+  }
+  const HLc = COURT_LEN/2-0.5, HWc = COURT_WID/2-0.5;
+  three.manualPos.x = Math.max(-HLc, Math.min(HLc, three.manualPos.x));
+  three.manualPos.z = Math.max(-HWc, Math.min(HWc, three.manualPos.z));
+
+  const eyeHeight = 1.68;
+  const basePos = three.manualPos.clone(); basePos.y = eyeHeight;
+  const spdFrac = Math.min(speed/9.2,1);
+  const bobFreq = 1.9 + spdFrac*2.6;
+  const phase = performance.now()/1000*bobFreq*Math.PI*2 + three.shakeSeed;
+  const bobAmt = 0.03 + spdFrac*0.22;
+  const swayAmt = 0.012 + spdFrac*0.075;
+  basePos.y += Math.sin(phase)*bobAmt;
+  basePos.x += Math.cos(phase*0.5)*swayAmt;
+  three.camera.position.copy(basePos);
+
+  const dir = new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));
+  let pitch = -0.03 - Math.min(speed,8)*0.03 + (three.freeLookPitch||0);
+  pitch = Math.max(-1.3, Math.min(1.3, pitch));
+  const target = basePos.clone().add(dir.multiplyScalar(5));
+  target.y = basePos.y + Math.tan(pitch)*5;
+  three.camera.up.set(0,1,0);
+  three.camera.lookAt(target);
+
+  three.snap.entities.forEach(e=>{
+    if(e.id===three.povId || e.team==='ball') return;
+    const mesh = three.meshes[e.id];
+    if(!mesh) return;
+    const fp = three.frozenPositions[e.id];
+    if(fp) mesh.position.copy(fp);
+    mesh.visible = true;
+  });
+  if(three.meshes[three.povId]) three.meshes[three.povId].visible = false;
+
+  const ballEnt = three.snap.entities.find(e=>e.team==='ball');
+  if(ballEnt){
+    const ballMesh = three.meshes[ballEnt.id];
+    if(three.passAnim){
+      const elapsed = performance.now() - three.passAnim.start;
+      const u = Math.min(1, elapsed/three.passAnim.duration);
+      const pos = three.passAnim.from.clone().lerp(three.passAnim.to, u);
+      if(ballMesh) ballMesh.position.copy(pos);
+      if(u>=1){
+        three.manualBallPos = three.passAnim.to.clone();
+        three.passAnim = null;
+      }
+    } else if(ballMesh && three.manualBallPos){
+      ballMesh.position.copy(three.manualBallPos);
+    }
   }
 }
 
@@ -1452,6 +1689,9 @@ document.getElementById('goto3D').onclick = ()=>{
   }
   three.transition = null;
   three.freeLookYaw = 0; three.freeLookPitch = 0;
+  three.controlMode = false;
+  document.getElementById('controlPad').style.display = 'none';
+  document.getElementById('controlModeBtn').textContent = '🎮 Controlar';
   document.getElementById('viewer3DModeBadge').textContent = 'PRIMEIRA PESSOA';
   three.t = 0; three.playing = true;
   document.getElementById('play3DBtn').textContent = '⏸ Pausar';
@@ -1459,12 +1699,65 @@ document.getElementById('goto3D').onclick = ()=>{
 };
 document.getElementById('backTo2D').onclick = ()=>{
   three.playing = false;
+  three.controlMode = false;
+  document.getElementById('controlPad').style.display = 'none';
+  document.getElementById('controlModeBtn').textContent = '🎮 Controlar';
   if(three.povId!=null) selectedId = three.povId;
   document.getElementById('viewer3D').style.display = 'none';
   document.getElementById('editorScreen').style.display = 'flex';
   updateStepUI();
   layoutCanvas();
 };
+document.getElementById('controlModeBtn').onclick = ()=>{
+  three.controlMode = !three.controlMode;
+  document.getElementById('controlPad').style.display = three.controlMode ? 'flex' : 'none';
+  document.getElementById('controlModeBtn').textContent = three.controlMode ? '🎬 Voltar ao lance' : '🎮 Controlar';
+  document.getElementById('viewer3DModeBadge').textContent = three.controlMode ? 'MODO CONTROLE' : 'PRIMEIRA PESSOA';
+  if(three.controlMode){
+    three.playing = false;
+    const durs = allDurations();
+    const povS = sample3D(three.povId, three.t, durs);
+    if(povS){
+      three.manualPos = povS.pos.clone();
+      three.manualYaw = povS.facingAngle;
+    }
+    three.frozenPositions = {};
+    three.snap.entities.forEach(e=>{
+      if(e.id===three.povId) return;
+      const s = sample3D(e.id, three.t, durs, e.team==='ball');
+      if(!s) return;
+      if(e.team==='ball') three.manualBallPos = s.pos.clone();
+      else three.frozenPositions[e.id] = s.pos.clone();
+    });
+    three.passAnim = null;
+    three.freeLookYaw = 0; three.freeLookPitch = 0;
+  } else {
+    moveInput = {fwd:false, back:false, left:false, right:false};
+    startCameraTransition();
+  }
+};
+function wireHoldButton(id, key){
+  const btn = document.getElementById(id);
+  const start = (ev)=>{ ev.preventDefault(); moveInput[key]=true; };
+  const stop = ()=>{ moveInput[key]=false; };
+  btn.addEventListener('pointerdown', start);
+  btn.addEventListener('pointerup', stop);
+  btn.addEventListener('pointercancel', stop);
+  btn.addEventListener('pointerleave', stop);
+}
+wireHoldButton('moveFwdBtn','fwd');
+wireHoldButton('moveBackBtn','back');
+wireHoldButton('moveLeftBtn','left');
+wireHoldButton('moveRightBtn','right');
+document.getElementById('passBtn').addEventListener('click', ()=>{
+  if(!three.controlMode || !three.manualPos) return;
+  const yaw = three.manualYaw + (three.freeLookYaw||0);
+  const dir = new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));
+  const from = (three.manualBallPos || three.manualPos).clone();
+  const to = three.manualPos.clone().add(dir.multiplyScalar(12));
+  const dist = from.distanceTo(to);
+  three.passAnim = {from, to, start: performance.now(), duration: Math.max(200, (dist/BALL_SPEED)*1000)};
+});
 document.getElementById('povSelect').addEventListener('change', (e)=>{
   three.povId = parseInt(e.target.value);
   selectedId = three.povId;
@@ -1582,23 +1875,25 @@ function applySegmentTexture(seg, sourceTex, imgAspect){
   seg.mat.map = tex; seg.mat.color.set(0xffffff); seg.mat.needsUpdate = true;
   if(seg.mesh) seg.mesh.visible = true; // banners só aparecem quando ganham uma foto
 }
+function applyBackdropPhoto(key, dataURL){
+  const img = new Image();
+  img.onload = ()=>{
+    const tex = new THREE.Texture(img);
+    tex.needsUpdate = true;
+    const imgAspect = img.naturalWidth / img.naturalHeight;
+    const bd = three.backdrops[key];
+    if(bd && bd.segments) bd.segments.forEach(seg=>applySegmentTexture(seg, tex, imgAspect));
+    three.envImages[key] = dataURL;
+  };
+  img.src = dataURL;
+}
 function wireBackdropUpload(btnId, inputId, key){
   document.getElementById(btnId).onclick = ()=> document.getElementById(inputId).click();
   document.getElementById(inputId).addEventListener('change', (ev)=>{
     const file = ev.target.files[0];
     if(!file || !three) return;
     const reader = new FileReader();
-    reader.onload = (e)=>{
-      const img = new Image();
-      img.onload = ()=>{
-        const tex = new THREE.Texture(img);
-        tex.needsUpdate = true;
-        const imgAspect = img.naturalWidth / img.naturalHeight;
-        const bd = three.backdrops[key];
-        if(bd && bd.segments) bd.segments.forEach(seg=>applySegmentTexture(seg, tex, imgAspect));
-      };
-      img.src = e.target.result;
-    };
+    reader.onload = (e)=> applyBackdropPhoto(key, e.target.result);
     reader.readAsDataURL(file);
   });
 }
@@ -1611,26 +1906,28 @@ wireBackdropUpload('bgBanner1Btn','bgBanner1Input','banner1');
 wireBackdropUpload('bgBanner2Btn','bgBanner2Input','banner2');
 
 // ---- foto do piso: substitui a madeira procedural pela foto real da quadra ----
+function applyFloorPhoto(dataURL){
+  const img = new Image();
+  img.onload = ()=>{
+    const tex = new THREE.Texture(img);
+    tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(6,3);
+    tex.encoding = THREE.sRGBEncoding;
+    tex.needsUpdate = true;
+    three.courtMat.map = tex;
+    three.courtMat.color.set(0xffffff);
+    document.getElementById('courtColorInput').value = '#ffffff';
+    three.courtMat.needsUpdate = true;
+    three.envImages.floor = dataURL;
+  };
+  img.src = dataURL;
+}
 document.getElementById('bgFloorBtn').onclick = ()=> document.getElementById('bgFloorInput').click();
 document.getElementById('bgFloorInput').addEventListener('change', (ev)=>{
   const file = ev.target.files[0];
   if(!file || !three) return;
   const reader = new FileReader();
-  reader.onload = (e)=>{
-    const img = new Image();
-    img.onload = ()=>{
-      const tex = new THREE.Texture(img);
-      tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(6,3);
-      tex.encoding = THREE.sRGBEncoding;
-      tex.needsUpdate = true;
-      three.courtMat.map = tex;
-      three.courtMat.color.set(0xffffff);
-      document.getElementById('courtColorInput').value = '#ffffff';
-      three.courtMat.needsUpdate = true;
-    };
-    img.src = e.target.result;
-  };
+  reader.onload = (e)=> applyFloorPhoto(e.target.result);
   reader.readAsDataURL(file);
 });
 
@@ -1653,6 +1950,129 @@ wireSideToggle('toggleStand1','bleachers1');
 wireSideToggle('toggleStand2','bleachers2');
 wireSideToggle('toggleBench1','bench1');
 wireSideToggle('toggleBench2','bench2');
+
+// ---------------------------------------------------------------------------
+// AMBIENTES SALVOS: fundo, cor da quadra e arquibancada/banco de cada lado,
+// tudo junto num preset com nome — pra não ter que remontar toda vez.
+// ---------------------------------------------------------------------------
+document.getElementById('saveEnvBtn').onclick = ()=>{
+  if(!three) return;
+  const overlay = openModal(`
+    <h3>Salvar ambiente</h3>
+    <input type="text" id="envNameInput" placeholder="Nome do ambiente (ex: Ginásio azul)">
+    <div id="envSizeWarn" style="font-size:11.5px;color:#e0b84a;margin:-6px 0 8px;"></div>
+    <div class="modalBtnRow">
+      <button class="secondary" id="envCancelBtn">Cancelar</button>
+      <button id="envConfirmBtn">Salvar</button>
+    </div>`);
+  document.getElementById('envCancelBtn').onclick = ()=> overlay.remove();
+  document.getElementById('envNameInput').focus();
+  document.getElementById('envConfirmBtn').onclick = async ()=>{
+    const nameInput = document.getElementById('envNameInput').value.trim();
+    const name = nameInput || `Ambiente ${new Date().toLocaleString('pt-BR')}`;
+    const envData = {
+      name,
+      courtColor: '#'+three.courtMat.color.getHexString(),
+      sides: {
+        stand1: three.sideExtras.bleachers1.visible,
+        stand2: three.sideExtras.bleachers2.visible,
+        bench1: three.sideExtras.bench1.visible,
+        bench2: three.sideExtras.bench2.visible
+      },
+      images: three.envImages,
+      savedAt: Date.now()
+    };
+    const data = JSON.stringify(envData);
+    const btn = document.getElementById('envConfirmBtn');
+    if(data.length > 4.6*1024*1024){
+      document.getElementById('envSizeWarn').textContent = 'As fotos juntas ficaram grandes demais pra salvar. Tenta usar fotos menores/comprimidas.';
+      return;
+    }
+    btn.textContent = 'Salvando...'; btn.disabled = true;
+    const key = 'environment_'+Date.now();
+    try{
+      await storageSet(key, data);
+      overlay.remove();
+      const status = document.getElementById('status');
+      status.textContent = '✓ ambiente salvo';
+      setTimeout(()=>status.textContent='', 2000);
+    }catch(e){
+      console.error(e);
+      btn.textContent = 'Erro: ' + (e && e.message ? e.message : 'tentar de novo');
+      btn.disabled = false;
+    }
+  };
+};
+
+function applyEnvironment(envData){
+  if(!three) return;
+  if(envData.courtColor){
+    three.courtMat.color.set(envData.courtColor);
+    document.getElementById('courtColorInput').value = envData.courtColor;
+  }
+  if(envData.sides){
+    const map = {stand1:'toggleStand1', stand2:'toggleStand2', bench1:'toggleBench1', bench2:'toggleBench2'};
+    const meshMap = {stand1:'bleachers1', stand2:'bleachers2', bench1:'bench1', bench2:'bench2'};
+    Object.keys(map).forEach(k=>{
+      const on = !!envData.sides[k];
+      three.sideExtras[meshMap[k]].visible = on;
+      document.getElementById(map[k]).classList.toggle('primary', on);
+    });
+  }
+  if(envData.images){
+    Object.keys(envData.images).forEach(key=>{
+      const dataURL = envData.images[key];
+      if(!dataURL) return;
+      if(key==='floor') applyFloorPhoto(dataURL);
+      else applyBackdropPhoto(key, dataURL);
+    });
+  }
+}
+
+document.getElementById('loadEnvBtn').onclick = async ()=>{
+  const overlay = openModal(`<h3>Ambientes salvos</h3><div id="envListArea" style="color:#999;font-size:13px;">Carregando...</div>
+    <div class="modalBtnRow"><button class="secondary" id="envListCloseBtn">Fechar</button></div>`);
+  document.getElementById('envListCloseBtn').onclick = ()=> overlay.remove();
+  const area = document.getElementById('envListArea');
+  try{
+    const listRes = await storageList('environment_');
+    const keys = (listRes && listRes.keys) || [];
+    if(keys.length===0){ area.textContent = 'Nenhum ambiente salvo ainda.'; return; }
+    const items = [];
+    for(const k of keys){
+      try{
+        const r = await storageGet(k);
+        if(r && r.value) items.push({key:k, data: JSON.parse(r.value)});
+      }catch(e){}
+    }
+    items.sort((a,b)=> (b.data.savedAt||0)-(a.data.savedAt||0));
+    area.innerHTML = '';
+    if(items.length===0){ area.textContent = 'Nenhum ambiente salvo ainda.'; return; }
+    items.forEach(item=>{
+      const row = document.createElement('div');
+      row.className = 'movementItem';
+      const dateStr = item.data.savedAt ? new Date(item.data.savedAt).toLocaleDateString('pt-BR') : '';
+      row.innerHTML = `<div><span class="mname">${item.data.name || 'Sem nome'}</span><span class="mdate">${dateStr}</span></div>
+        <div style="display:flex;gap:6px;">
+          <button class="loadBtn">Carregar</button>
+          <button class="del">🗑</button>
+        </div>`;
+      row.querySelector('.loadBtn').onclick = ()=>{
+        applyEnvironment(item.data);
+        overlay.remove();
+      };
+      row.querySelector('.del').onclick = async (ev)=>{
+        const delBtn = ev.currentTarget;
+        if(delBtn.dataset.confirming!=='1'){ delBtn.textContent = 'Confirmar?'; delBtn.dataset.confirming='1'; return; }
+        try{ await storageDelete(item.key); row.remove(); }catch(e){ console.error(e); }
+      };
+      area.appendChild(row);
+    });
+  }catch(e){
+    console.error(e);
+    area.textContent = 'Erro ao carregar os ambientes salvos.';
+  }
+};
 </script>
 </body>
 </html>
