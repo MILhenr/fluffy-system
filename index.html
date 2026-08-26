@@ -129,7 +129,7 @@
       <button id="bgBanner2Btn" class="txt">🚩 Banner esquerda</button>
       <input type="file" id="bgBanner2Input" accept="image/*" style="display:none">
       <div class="sep"></div>
-      <label class="txt" style="display:flex;align-items:center;gap:8px;cursor:pointer;">🎨 Cor das áreas (círculo e gols)
+      <label class="txt" style="display:flex;align-items:center;gap:8px;cursor:pointer;">🎨 Cor da quadra
         <input type="color" id="courtColorInput" value="#ffffff" style="width:34px;height:28px;border:none;background:none;padding:0;cursor:pointer;">
       </label>
       <div class="sep"></div>
@@ -1203,10 +1203,10 @@ function initThree(){
   scene.background = new THREE.Color(0x1b1b1b);
   scene.fog = new THREE.Fog(0x1b1b1b, 40, 130);
   const renderer = new THREE.WebGLRenderer({antialias:true});
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 1.5));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
   renderer.setSize(wrap.clientWidth, wrap.clientHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.gammaFactor = 2.2;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -1244,7 +1244,7 @@ function initThree(){
   scene.add(new THREE.AmbientLight(0x888888, 0.75));
   const dl = new THREE.DirectionalLight(0xffffff, 0.75);
   dl.castShadow = true;
-  dl.shadow.mapSize.set(512,512);
+  dl.shadow.mapSize.set(1024,1024);
   dl.shadow.camera.left = -COURT_LEN/2-4; dl.shadow.camera.right = COURT_LEN/2+4;
   dl.shadow.camera.top = COURT_WID/2+4; dl.shadow.camera.bottom = -COURT_WID/2-4;
   dl.shadow.camera.near = 1; dl.shadow.camera.far = 60;
@@ -1263,35 +1263,14 @@ function initThree(){
   const courtPlane = new THREE.Mesh(new THREE.PlaneGeometry(COURT_LEN, COURT_WID), courtMat);
   courtPlane.rotation.x = -Math.PI/2; courtPlane.receiveShadow = true; scene.add(courtPlane);
 
-  // ---- áreas coloridas (círculo central e áreas do gol) — preenchimento
-  // sólido que recebe a cor escolhida pelo usuário. As LINHAS de contorno
-  // (lateral, meio-de-campo, área, pênalti) ficam SEMPRE brancas, à parte.
-  function buildFilledArea(points, color, yPos=0.012){
-    const shape = new THREE.Shape();
-    points.forEach(([x,z], i)=>{
-      if(i===0) shape.moveTo(x, -z); else shape.lineTo(x, -z);
-    });
-    const geom = new THREE.ShapeGeometry(shape);
-    const mat = new THREE.MeshBasicMaterial({color, side:THREE.DoubleSide, depthWrite:false});
-    const mesh = new THREE.Mesh(geom, mat);
-    mesh.rotation.x = -Math.PI/2;
-    mesh.position.y = yPos;
-    scene.add(mesh);
-    return mesh;
-  }
-
-  function addLine(points, color=0xffffff){
+  function addLine(points, color=0x999999){
     const g = new THREE.BufferGeometry().setFromPoints(points.map(p=>new THREE.Vector3(p[0],0.02,p[1])));
     scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({color})));
   }
   addLine([[-HL,-HW],[HL,-HW],[HL,HW],[-HL,HW],[-HL,-HW]]);
   addLine([[0,-HW],[0,HW]]);
-
-  // círculo central: contorno branco (linha) + preenchimento colorido por baixo
-  const centerCirclePts = [];
-  for(let i=0;i<=64;i++){ const a=i/64*Math.PI*2; centerCirclePts.push([Math.cos(a)*3, Math.sin(a)*3]); }
-  addLine(centerCirclePts);
-  const centerFill = buildFilledArea(centerCirclePts, 0xffffff, 0.011);
+  const cpts=[]; for(let i=0;i<=64;i++){const a=i/64*Math.PI*2; cpts.push(new THREE.Vector3(Math.cos(a)*3,0.02,Math.sin(a)*3));}
+  scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(cpts), new THREE.LineBasicMaterial({color:0x999999})));
 
   // área de meta oficial: dois arcos de 6m de raio (centrados em cada poste),
   // ligados por uma reta — não é um retângulo.
@@ -1307,24 +1286,20 @@ function initThree(){
     const local = [...arcA, ...arcB.slice().reverse()];
     return local.map(([lx,lz])=>[xSign*(HL+lx), lz]);
   }
-  const goalArea1Pts = goalAreaLine(1);
-  const goalArea2Pts = goalAreaLine(-1);
-  addLine(goalArea1Pts);
-  addLine(goalArea2Pts);
-  const goalArea1Fill = buildFilledArea(goalArea1Pts, 0xffffff, 0.011);
-  const goalArea2Fill = buildFilledArea(goalArea2Pts, 0xffffff, 0.011);
+  addLine(goalAreaLine(1));
+  addLine(goalAreaLine(-1));
 
-  // marca do pênalti (6m da linha de gol) e do segundo pênalti (10m) — sempre brancas
+  // marca do pênalti (6m da linha de gol) e do segundo pênalti (10m)
   [1,-1].forEach(xSign=>{
     [6,10].forEach(dist=>{
-      const p = new THREE.Mesh(new THREE.CircleGeometry(0.06,12), new THREE.MeshBasicMaterial({color:0xffffff}));
+      const p = new THREE.Mesh(new THREE.CircleGeometry(0.06,12), new THREE.MeshBasicMaterial({color:0xdddddd}));
       p.rotation.x = -Math.PI/2; p.position.set(xSign*(HL-dist), 0.021, 0);
       scene.add(p);
     });
   });
 
-  addLine([[HL,-1.5],[HL,1.5]],0xffffff);
-  addLine([[-HL,-1.5],[-HL,1.5]],0xffffff);
+  addLine([[HL,-1.5],[HL,1.5]],0xdddddd);
+  addLine([[-HL,-1.5],[-HL,1.5]],0xdddddd);
 
   // gol simples (postes + travessão)
   function buildGoalFrame(xSign){
@@ -1433,7 +1408,6 @@ function initThree(){
     backdrops:{ goal1:goal1Backdrop, goal2:goal2Backdrop, stand1:stand1Backdrop, stand2:stand2Backdrop, roof:roofBackdrop, banner1:banner1Backdrop, banner2:banner2Backdrop },
     sideExtras:{ bleachers1, bleachers2, bench1, bench2 },
     courtMat,
-    areaFills:[centerFill, goalArea1Fill, goalArea2Fill],
     transition:null
   };
 
@@ -1884,32 +1858,6 @@ document.getElementById('record3DBtn').onclick = ()=>{
   else startRecording();
 };
 
-// ---------------------------------------------------------------------------
-// Comprime e redimensiona a imagem antes de gerar o dataURL, evitando que
-// fotos de câmera (3-5MB cada) estourem o limite de salvamento do ambiente.
-// ---------------------------------------------------------------------------
-function compressImageFile(file, maxDim = 1600, quality = 0.75){
-  return new Promise((resolve, reject)=>{
-    const reader = new FileReader();
-    reader.onload = (e)=>{
-      const img = new Image();
-      img.onload = ()=>{
-        let {width, height} = img;
-        if(width > height && width > maxDim){ height = height*(maxDim/width); width = maxDim; }
-        else if(height > maxDim){ width = width*(maxDim/height); height = maxDim; }
-        const c = document.createElement('canvas');
-        c.width = Math.round(width); c.height = Math.round(height);
-        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-        resolve(c.toDataURL('image/jpeg', quality));
-      };
-      img.onerror = reject;
-      img.src = e.target.result;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
 function applySegmentTexture(seg, sourceTex, imgAspect){
   const tex = sourceTex.clone();
   tex.image = sourceTex.image;
@@ -1927,6 +1875,26 @@ function applySegmentTexture(seg, sourceTex, imgAspect){
   seg.mat.map = tex; seg.mat.color.set(0xffffff); seg.mat.needsUpdate = true;
   if(seg.mesh) seg.mesh.visible = true; // banners só aparecem quando ganham uma foto
 }
+function compressImageDataURL(dataURL, maxDim=1280, quality=0.72){
+  return new Promise((resolve)=>{
+    const img = new Image();
+    img.onload = ()=>{
+      let w = img.naturalWidth, h = img.naturalHeight;
+      const scale = Math.min(1, maxDim/Math.max(w,h));
+      w = Math.max(1, Math.round(w*scale));
+      h = Math.max(1, Math.round(h*scale));
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const ctx2 = c.getContext('2d');
+      ctx2.drawImage(img, 0, 0, w, h);
+      try{ resolve(c.toDataURL('image/jpeg', quality)); }
+      catch(e){ resolve(dataURL); }
+    };
+    img.onerror = ()=> resolve(dataURL);
+    img.src = dataURL;
+  });
+}
+
 function applyBackdropPhoto(key, dataURL){
   const img = new Image();
   img.onload = ()=>{
@@ -1941,22 +1909,15 @@ function applyBackdropPhoto(key, dataURL){
 }
 function wireBackdropUpload(btnId, inputId, key){
   document.getElementById(btnId).onclick = ()=> document.getElementById(inputId).click();
-  document.getElementById(inputId).addEventListener('change', async (ev)=>{
+  document.getElementById(inputId).addEventListener('change', (ev)=>{
     const file = ev.target.files[0];
     if(!file || !three) return;
-    const btn = document.getElementById(btnId);
-    const originalLabel = btn.textContent;
-    btn.textContent = 'Processando...';
-    try{
-      const dataURL = await compressImageFile(file, 1600, 0.75);
-      applyBackdropPhoto(key, dataURL);
-    }catch(e){
-      console.error(e);
-      alert('Não consegui processar essa imagem.');
-    }finally{
-      btn.textContent = originalLabel;
-      ev.target.value = '';
-    }
+    const reader = new FileReader();
+    reader.onload = async (e)=>{
+      const compressed = await compressImageDataURL(e.target.result, 1280, 0.72);
+      applyBackdropPhoto(key, compressed);
+    };
+    reader.readAsDataURL(file);
   });
 }
 wireBackdropUpload('bgGoal1Btn','bgGoal1Input','goal1');
@@ -1978,35 +1939,27 @@ function applyFloorPhoto(dataURL){
     tex.needsUpdate = true;
     three.courtMat.map = tex;
     three.courtMat.color.set(0xffffff);
+    document.getElementById('courtColorInput').value = '#ffffff';
     three.courtMat.needsUpdate = true;
     three.envImages.floor = dataURL;
   };
   img.src = dataURL;
 }
 document.getElementById('bgFloorBtn').onclick = ()=> document.getElementById('bgFloorInput').click();
-document.getElementById('bgFloorInput').addEventListener('change', async (ev)=>{
+document.getElementById('bgFloorInput').addEventListener('change', (ev)=>{
   const file = ev.target.files[0];
   if(!file || !three) return;
-  const btn = document.getElementById('bgFloorBtn');
-  const originalLabel = btn.textContent;
-  btn.textContent = 'Processando...';
-  try{
-    const dataURL = await compressImageFile(file, 1200, 0.75);
-    applyFloorPhoto(dataURL);
-  }catch(e){
-    console.error(e);
-    alert('Não consegui processar essa imagem.');
-  }finally{
-    btn.textContent = originalLabel;
-    ev.target.value = '';
-  }
+  const reader = new FileReader();
+  reader.onload = async (e)=>{
+    const compressed = await compressImageDataURL(e.target.result, 1280, 0.72);
+    applyFloorPhoto(compressed);
+  };
+  reader.readAsDataURL(file);
 });
 
-// A cor escolhida aqui pinta SÓ o círculo central e as duas áreas do gol —
-// as linhas de contorno (lateral, área, pênalti) continuam sempre brancas.
 document.getElementById('courtColorInput').addEventListener('input', (e)=>{
-  if(!three || !three.areaFills) return;
-  three.areaFills.forEach(mesh=> mesh.material.color.set(e.target.value));
+  if(!three || !three.courtMat) return;
+  three.courtMat.color.set(e.target.value);
 });
 
 function wireSideToggle(btnId, meshKey){
@@ -2025,7 +1978,7 @@ wireSideToggle('toggleBench1','bench1');
 wireSideToggle('toggleBench2','bench2');
 
 // ---------------------------------------------------------------------------
-// AMBIENTES SALVOS: fundo, cor das áreas e arquibancada/banco de cada lado,
+// AMBIENTES SALVOS: fundo, cor da quadra e arquibancada/banco de cada lado,
 // tudo junto num preset com nome — pra não ter que remontar toda vez.
 // ---------------------------------------------------------------------------
 document.getElementById('saveEnvBtn').onclick = ()=>{
@@ -2045,7 +1998,7 @@ document.getElementById('saveEnvBtn').onclick = ()=>{
     const name = nameInput || `Ambiente ${new Date().toLocaleString('pt-BR')}`;
     const envData = {
       name,
-      courtColor: '#'+three.areaFills[0].material.color.getHexString(),
+      courtColor: '#'+three.courtMat.color.getHexString(),
       sides: {
         stand1: three.sideExtras.bleachers1.visible,
         stand2: three.sideExtras.bleachers2.visible,
@@ -2080,7 +2033,7 @@ document.getElementById('saveEnvBtn').onclick = ()=>{
 function applyEnvironment(envData){
   if(!three) return;
   if(envData.courtColor){
-    three.areaFills.forEach(mesh=> mesh.material.color.set(envData.courtColor));
+    three.courtMat.color.set(envData.courtColor);
     document.getElementById('courtColorInput').value = envData.courtColor;
   }
   if(envData.sides){
