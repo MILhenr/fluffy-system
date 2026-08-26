@@ -143,6 +143,9 @@
       <label class="txt" style="display:flex;align-items:center;gap:8px;cursor:pointer;">🎨 Cor da quadra
         <input type="color" id="courtColorInput" value="#ffffff" style="width:34px;height:28px;border:none;background:none;padding:0;cursor:pointer;">
       </label>
+      <label class="txt" style="display:flex;align-items:center;gap:8px;cursor:pointer;">🖊️ Cor das marcações
+        <input type="color" id="markColorInput" value="#999999" style="width:34px;height:28px;border:none;background:none;padding:0;cursor:pointer;">
+      </label>
       <div class="sep"></div>
       <button id="saveEnvBtn" class="txt primary">💾 Salvar ambiente</button>
       <button id="loadEnvBtn" class="txt">📂 Ambientes</button>
@@ -1273,14 +1276,17 @@ function initThree(){
   const courtPlane = new THREE.Mesh(new THREE.PlaneGeometry(COURT_LEN, COURT_WID), courtMat);
   courtPlane.rotation.x = -Math.PI/2; courtPlane.receiveShadow = true; scene.add(courtPlane);
 
-  function addLine(points, color=0x999999){
+  const lineMat = new THREE.LineBasicMaterial({color:0x999999});
+  const markMat = new THREE.MeshBasicMaterial({color:0x999999});
+
+  function addLine(points){
     const g = new THREE.BufferGeometry().setFromPoints(points.map(p=>new THREE.Vector3(p[0],0.02,p[1])));
-    scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({color})));
+    scene.add(new THREE.Line(g, lineMat));
   }
   addLine([[-HL,-HW],[HL,-HW],[HL,HW],[-HL,HW],[-HL,-HW]]);
   addLine([[0,-HW],[0,HW]]);
   const cpts=[]; for(let i=0;i<=64;i++){const a=i/64*Math.PI*2; cpts.push(new THREE.Vector3(Math.cos(a)*3,0.02,Math.sin(a)*3));}
-  scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(cpts), new THREE.LineBasicMaterial({color:0x999999})));
+  scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(cpts), lineMat));
 
   // área de meta oficial: dois arcos de 6m de raio (centrados em cada poste),
   // ligados por uma reta — não é um retângulo.
@@ -1300,16 +1306,18 @@ function initThree(){
   addLine(goalAreaLine(-1));
 
   // marca do pênalti (6m da linha de gol) e do segundo pênalti (10m)
+  const markMeshes = [];
   [1,-1].forEach(xSign=>{
     [6,10].forEach(dist=>{
-      const p = new THREE.Mesh(new THREE.CircleGeometry(0.06,12), new THREE.MeshBasicMaterial({color:0xdddddd}));
+      const p = new THREE.Mesh(new THREE.CircleGeometry(0.06,12), markMat);
       p.rotation.x = -Math.PI/2; p.position.set(xSign*(HL-dist), 0.021, 0);
       scene.add(p);
+      markMeshes.push(p);
     });
   });
 
-  addLine([[HL,-1.5],[HL,1.5]],0xdddddd);
-  addLine([[-HL,-1.5],[-HL,1.5]],0xdddddd);
+  addLine([[HL,-1.5],[HL,1.5]]);
+  addLine([[-HL,-1.5],[-HL,1.5]]);
 
   // gol simples (postes + travessão)
   function buildGoalFrame(xSign){
@@ -1417,7 +1425,7 @@ function initThree(){
     envImages:{},
     backdrops:{ goal1:goal1Backdrop, goal2:goal2Backdrop, stand1:stand1Backdrop, stand2:stand2Backdrop, roof:roofBackdrop, banner1:banner1Backdrop, banner2:banner2Backdrop },
     sideExtras:{ bleachers1, bleachers2, bench1, bench2 },
-    courtMat,
+    courtMat, lineMat, markMat,
     transition:null
   };
 
@@ -1977,6 +1985,11 @@ document.getElementById('courtColorInput').addEventListener('input', (e)=>{
   if(!three || !three.courtMat) return;
   three.courtMat.color.set(e.target.value);
 });
+document.getElementById('markColorInput').addEventListener('input', (e)=>{
+  if(!three) return;
+  if(three.lineMat) three.lineMat.color.set(e.target.value);
+  if(three.markMat) three.markMat.color.set(e.target.value);
+});
 
 function wireSideToggle(btnId, meshKey){
   const btn = document.getElementById(btnId);
@@ -2015,6 +2028,7 @@ document.getElementById('saveEnvBtn').onclick = ()=>{
     const envData = {
       name,
       courtColor: '#'+three.courtMat.color.getHexString(),
+      markColor: '#'+three.lineMat.color.getHexString(),
       sides: {
         stand1: three.sideExtras.bleachers1.visible,
         stand2: three.sideExtras.bleachers2.visible,
@@ -2051,6 +2065,11 @@ function applyEnvironment(envData){
   if(envData.courtColor){
     three.courtMat.color.set(envData.courtColor);
     document.getElementById('courtColorInput').value = envData.courtColor;
+  }
+  if(envData.markColor){
+    three.lineMat.color.set(envData.markColor);
+    three.markMat.color.set(envData.markColor);
+    document.getElementById('markColorInput').value = envData.markColor;
   }
   if(envData.sides){
     const map = {stand1:'toggleStand1', stand2:'toggleStand2', bench1:'toggleBench1', bench2:'toggleBench2'};
