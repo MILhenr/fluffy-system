@@ -110,6 +110,17 @@
       <select id="povSelect"></select>
       <div class="sep"></div>
       <button id="controlModeBtn" class="txt primary">🎮 Controlar</button>
+      <button id="speedToggleBtn" class="txt">⏱ Velocidade: 1x</button>
+    </div>
+    <div id="speedToolbar" style="display:none;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 14px;background:#101010;border-bottom:1px solid #262626;">
+      <button class="txt" data-spd3d="0.25">0.25x</button>
+      <button class="txt" data-spd3d="0.5">0.5x</button>
+      <button class="txt" data-spd3d="0.75">0.75x</button>
+      <button class="txt primary" data-spd3d="1">1x</button>
+      <button class="txt" data-spd3d="1.15">1.15x</button>
+      <button class="txt" data-spd3d="1.25">1.25x</button>
+      <button class="txt" data-spd3d="1.35">1.35x</button>
+      <button class="txt" data-spd3d="1.5">1.5x</button>
     </div>
     <div id="bgToolbar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 14px;background:#101010;border-bottom:1px solid #262626;">
       <button id="bgFloorBtn" class="txt">🪵 Foto do piso</button>
@@ -175,14 +186,6 @@
         <button id="play3DBtn" class="txt primary" style="font-size:17px;padding:14px 26px;font-weight:700;">⏸ Pausar</button>
         <button id="replay3DBtn" class="txt">🔁 Repetir</button>
         <button id="stop3DBtn" class="txt">⏹ Parar</button>
-        <button class="txt" data-spd3d="0.25">0.25x</button>
-        <button class="txt" data-spd3d="0.5">0.5x</button>
-        <button class="txt" data-spd3d="0.75">0.75x</button>
-        <button class="txt primary" data-spd3d="1">1x</button>
-        <button class="txt" data-spd3d="1.15">1.15x</button>
-        <button class="txt" data-spd3d="1.25">1.25x</button>
-        <button class="txt" data-spd3d="1.35">1.35x</button>
-        <button class="txt" data-spd3d="1.5">1.5x</button>
       </div>
     </div>
   </div>
@@ -198,8 +201,8 @@
    e o ângulo de olhar de cada entidade naquele momento da jogada
    ========================================================================= */
 const COURT_LEN = 42, COURT_WID = 23; // pouco acima do oficial
-const MIN_SPEED = 1.6, MAX_SPEED = 9.2, MIN_STEP_DURATION = 0.07;
-const BALL_SPEED = 12.5; // m/s constante — a bola sempre viaja nessa velocidade,
+const MIN_SPEED = 1.5, MAX_SPEED = 8.2, MIN_STEP_DURATION = 0.07;
+const BALL_SPEED = 10.8; // m/s constante — a bola sempre viaja nessa velocidade,
                          // nunca fica mais lenta só porque um jogador correu
                          // muito no mesmo intervalo.
 
@@ -275,7 +278,7 @@ function entityStepDist(i, id){
   const dx=(b.x-a.x)*COURT_WID, dy=(b.y-a.y)*COURT_LEN;
   return Math.hypot(dx,dy);
 }
-const PACE_MULTIPLIER = 0.55; // deixa TUDO mais rápido/dinâmico, independente do que estava dominando o tempo da etapa
+const PACE_MULTIPLIER = 0.34; // ritmo geral de tudo — ajustável
 
 function segmentDuration(i){
   const ballEnt = entities.find(e=>e.team==='ball');
@@ -1143,6 +1146,7 @@ function makePlayerMesh(team, numberText, heightM){
   g.add(torsoPivot);
   const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.19,0.6,10), mat);
   torso.position.y = 0.31; torsoPivot.add(torso);
+  const torsoMesh = torso;
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.135,12,10), skinMat);
   head.position.y = 0.77; torsoPivot.add(head);
 
@@ -1157,7 +1161,7 @@ function makePlayerMesh(team, numberText, heightM){
     torsoPivot.add(back);
   }
 
-  const legs = [], arms = [], knees = [], elbows = [];
+  const legs = [], arms = [], knees = [], elbows = [], thighMeshes = [], shinMeshes = [];
   for(const s of [-1,1]){
     const legPivot = new THREE.Group();
     legPivot.position.set(s*0.11, 0.72, 0);
@@ -1167,12 +1171,14 @@ function makePlayerMesh(team, numberText, heightM){
     // coxa (pele)
     const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.054,0.26,8), skinMat);
     thigh.position.y = -0.27; legPivot.add(thigh);
+    thighMeshes.push(thigh);
     const kneePivot = new THREE.Group();
     kneePivot.position.set(0,-0.38,0);
     legPivot.add(kneePivot);
     // meião (cor do time)
     const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.048,0.04,0.36,8), mat);
     shin.position.y = -0.18; kneePivot.add(shin);
+    shinMeshes.push(shin);
     // chuteira
     const foot = new THREE.Mesh(new THREE.BoxGeometry(0.075,0.045,0.15), shoeMat);
     foot.position.set(0,-0.36,0.04); kneePivot.add(foot);
@@ -1190,7 +1196,11 @@ function makePlayerMesh(team, numberText, heightM){
     torsoPivot.add(armPivot); arms.push(armPivot); elbows.push(elbowPivot);
   }
   g.userData.rig = {torsoPivot, legs, arms, knees, elbows};
-  g.traverse(o=>{ if(o.isMesh){ o.castShadow = true; } });
+  // só as peças principais (tronco, coxa, canela) projetam sombra — reduz
+  // bastante o custo com vários jogadores em quadra, sem perder a silhueta
+  torsoMesh.castShadow = true;
+  thighMeshes.forEach(m=>m.castShadow=true);
+  shinMeshes.forEach(m=>m.castShadow=true);
   // altura do modelo sem escala ≈ 1.625m (até o topo da cabeça); escala pra
   // bater com a altura real sorteada pra esse jogador (1.70-1.80m)
   g.scale.setScalar((heightM || 1.75) / 1.625);
@@ -1203,7 +1213,7 @@ function initThree(){
   scene.background = new THREE.Color(0x1b1b1b);
   scene.fog = new THREE.Fog(0x1b1b1b, 40, 130);
   const renderer = new THREE.WebGLRenderer({antialias:true});
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 1));
   renderer.setSize(wrap.clientWidth, wrap.clientHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -1244,7 +1254,7 @@ function initThree(){
   scene.add(new THREE.AmbientLight(0x888888, 0.75));
   const dl = new THREE.DirectionalLight(0xffffff, 0.75);
   dl.castShadow = true;
-  dl.shadow.mapSize.set(1024,1024);
+  dl.shadow.mapSize.set(512,512);
   dl.shadow.camera.left = -COURT_LEN/2-4; dl.shadow.camera.right = COURT_LEN/2+4;
   dl.shadow.camera.top = COURT_WID/2+4; dl.shadow.camera.bottom = -COURT_WID/2-4;
   dl.shadow.camera.near = 1; dl.shadow.camera.far = 60;
@@ -1787,12 +1797,18 @@ document.getElementById('scrub3D').addEventListener('input', (e)=>{
   const dur = totalDuration();
   three.t = (e.target.value/1000)*dur;
 });
-document.querySelectorAll('#viewer3D #bottombar button[data-spd3d]').forEach(b=>{
+document.querySelectorAll('#speedToolbar button[data-spd3d]').forEach(b=>{
   b.addEventListener('click', ()=>{
-    document.querySelectorAll('#viewer3D #bottombar button[data-spd3d]').forEach(x=>x.classList.remove('primary'));
+    document.querySelectorAll('#speedToolbar button[data-spd3d]').forEach(x=>x.classList.remove('primary'));
     b.classList.add('primary');
     three.speed = parseFloat(b.dataset.spd3d);
+    document.getElementById('speedToggleBtn').textContent = `⏱ Velocidade: ${b.dataset.spd3d}x`;
+    document.getElementById('speedToolbar').style.display = 'none';
   });
+});
+document.getElementById('speedToggleBtn').addEventListener('click', ()=>{
+  const el = document.getElementById('speedToolbar');
+  el.style.display = el.style.display==='none' ? 'flex' : 'none';
 });
 
 // ---------------------------------------------------------------------------
