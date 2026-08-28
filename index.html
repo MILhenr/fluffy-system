@@ -140,11 +140,8 @@
       <button id="bgBanner2Btn" class="txt">🚩 Banner esquerda</button>
       <input type="file" id="bgBanner2Input" accept="image/*" style="display:none">
       <div class="sep"></div>
-      <label class="txt" style="display:flex;align-items:center;gap:8px;cursor:pointer;">🎨 Cor da quadra
-        <input type="color" id="courtColorInput" value="#ffffff" style="width:34px;height:28px;border:none;background:none;padding:0;cursor:pointer;">
-      </label>
-      <label class="txt" style="display:flex;align-items:center;gap:8px;cursor:pointer;">🖊️ Cor das marcações
-        <input type="color" id="markColorInput" value="#999999" style="width:34px;height:28px;border:none;background:none;padding:0;cursor:pointer;">
+      <label class="txt" style="display:flex;align-items:center;gap:8px;cursor:pointer;">🎯 Cor das áreas
+        <input type="color" id="areaColorInput" value="#2f6fb0" style="width:34px;height:28px;border:none;background:none;padding:0;cursor:pointer;">
       </label>
       <div class="sep"></div>
       <button id="saveEnvBtn" class="txt primary">💾 Salvar ambiente</button>
@@ -282,6 +279,7 @@ function entityStepDist(i, id){
   return Math.hypot(dx,dy);
 }
 const PACE_MULTIPLIER = 0.34; // ritmo geral de tudo — ajustável
+const THINK_HOLD = 0.32; // pequena pausa "pensando" antes de cada movimento (só jogadores)
 
 function segmentDuration(i){
   const ballEnt = entities.find(e=>e.team==='ball');
@@ -295,7 +293,7 @@ function segmentDuration(i){
     const ballLen = entityStepDist(i, ballEnt.id);
     if(ballLen>0.02) dur = Math.max(dur, ballLen/BALL_SPEED);
   }
-  return Math.max(dur * PACE_MULTIPLIER, 0.04);
+  return Math.max(dur * PACE_MULTIPLIER, 0.04) + THINK_HOLD;
 }
 function allDurations(){ const d=[]; for(let i=0;i<steps.length-1;i++) d.push(segmentDuration(i)); return d; }
 function totalDuration(durs){ durs = durs || allDurations(); return durs.reduce((a,b)=>a+b,0) || 0.01; }
@@ -311,16 +309,19 @@ function sampleEntityAt(id, t, durs, isBall){
       if(!a && !b) { acc+=dur; continue; }
       if(!a) return b;
       if(!b) return a;
+      const localT = t - acc;
       let u;
       if(isBall){
-        // a bola percorre sua distância na velocidade constante dela; se o
-        // segmento for mais longo (porque um jogador demorou mais), ela chega
-        // no destino antes e só espera lá — nunca "arrasta" mais devagar.
+        // a bola não "pensa" — percorre sua distância na velocidade constante
+        // dela assim que o segmento começa; se sobrar tempo, ela só espera.
         const L = entityStepDist(i, id);
         const travel = L>0.02 ? (L/BALL_SPEED)*PACE_MULTIPLIER : 0;
-        u = travel>0 ? Math.max(0,Math.min(1,(t-acc)/travel)) : 1;
+        u = travel>0 ? Math.max(0,Math.min(1, localT/travel)) : 1;
       } else {
-        u = dur>0 ? Math.max(0,Math.min(1,(t-acc)/dur)) : 1;
+        // jogador: fica uma pausinha se mexendo (sem trocar de posição) como
+        // se estivesse decidindo o que fazer, só depois começa a se mover.
+        const moveDur = Math.max(0.01, dur - THINK_HOLD);
+        u = localT<=THINK_HOLD ? 0 : Math.max(0, Math.min(1, (localT-THINK_HOLD)/moveDur));
       }
       // interpolação linear — sem suavizar/desacelerar em cada etapa, pra não
       // criar aquele instante de "pausa" ao chegar em cada uma (futsal é contínuo).
@@ -1278,15 +1279,29 @@ function initThree(){
 
   const lineMat = new THREE.LineBasicMaterial({color:0x999999});
   const markMat = new THREE.MeshBasicMaterial({color:0x999999});
+  const areaMat = new THREE.MeshLambertMaterial({color:0x2f6fb0});
 
   function addLine(points){
     const g = new THREE.BufferGeometry().setFromPoints(points.map(p=>new THREE.Vector3(p[0],0.02,p[1])));
     scene.add(new THREE.Line(g, lineMat));
   }
+  function fillArea(points2D){
+    const shape = new THREE.Shape();
+    points2D.forEach(([x,z],i)=>{ i===0 ? shape.moveTo(x,z) : shape.lineTo(x,z); });
+    const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), areaMat);
+    mesh.rotation.x = -Math.PI/2;
+    mesh.position.y = 0.019; // um pouquinho abaixo das linhas, pra elas ficarem por cima
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+    return mesh;
+  }
   addLine([[-HL,-HW],[HL,-HW],[HL,HW],[-HL,HW],[-HL,-HW]]);
   addLine([[0,-HW],[0,HW]]);
   const cpts=[]; for(let i=0;i<=64;i++){const a=i/64*Math.PI*2; cpts.push(new THREE.Vector3(Math.cos(a)*3,0.02,Math.sin(a)*3));}
   scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(cpts), lineMat));
+  const centerCirclePts = [];
+  for(let i=0;i<64;i++){ const a=i/64*Math.PI*2; centerCirclePts.push([Math.cos(a)*3, Math.sin(a)*3]); }
+  fillArea(centerCirclePts);
 
   // área de meta oficial: dois arcos de 6m de raio (centrados em cada poste),
   // ligados por uma reta — não é um retângulo.
@@ -1302,6 +1317,8 @@ function initThree(){
     const local = [...arcA, ...arcB.slice().reverse()];
     return local.map(([lx,lz])=>[xSign*(HL+lx), lz]);
   }
+  fillArea(goalAreaLine(1));
+  fillArea(goalAreaLine(-1));
   addLine(goalAreaLine(1));
   addLine(goalAreaLine(-1));
 
@@ -1425,7 +1442,7 @@ function initThree(){
     envImages:{},
     backdrops:{ goal1:goal1Backdrop, goal2:goal2Backdrop, stand1:stand1Backdrop, stand2:stand2Backdrop, roof:roofBackdrop, banner1:banner1Backdrop, banner2:banner2Backdrop },
     sideExtras:{ bleachers1, bleachers2, bench1, bench2 },
-    courtMat, lineMat, markMat,
+    courtMat, lineMat, markMat, areaMat,
     transition:null
   };
 
@@ -1963,7 +1980,6 @@ function applyFloorPhoto(dataURL){
     tex.needsUpdate = true;
     three.courtMat.map = tex;
     three.courtMat.color.set(0xffffff);
-    document.getElementById('courtColorInput').value = '#ffffff';
     three.courtMat.needsUpdate = true;
     three.envImages.floor = dataURL;
   };
@@ -1981,14 +1997,9 @@ document.getElementById('bgFloorInput').addEventListener('change', (ev)=>{
   reader.readAsDataURL(file);
 });
 
-document.getElementById('courtColorInput').addEventListener('input', (e)=>{
-  if(!three || !three.courtMat) return;
-  three.courtMat.color.set(e.target.value);
-});
-document.getElementById('markColorInput').addEventListener('input', (e)=>{
-  if(!three) return;
-  if(three.lineMat) three.lineMat.color.set(e.target.value);
-  if(three.markMat) three.markMat.color.set(e.target.value);
+document.getElementById('areaColorInput').addEventListener('input', (e)=>{
+  if(!three || !three.areaMat) return;
+  three.areaMat.color.set(e.target.value);
 });
 
 function wireSideToggle(btnId, meshKey){
@@ -2027,8 +2038,7 @@ document.getElementById('saveEnvBtn').onclick = ()=>{
     const name = nameInput || `Ambiente ${new Date().toLocaleString('pt-BR')}`;
     const envData = {
       name,
-      courtColor: '#'+three.courtMat.color.getHexString(),
-      markColor: '#'+three.lineMat.color.getHexString(),
+      areaColor: '#'+three.areaMat.color.getHexString(),
       sides: {
         stand1: three.sideExtras.bleachers1.visible,
         stand2: three.sideExtras.bleachers2.visible,
@@ -2062,14 +2072,9 @@ document.getElementById('saveEnvBtn').onclick = ()=>{
 
 function applyEnvironment(envData){
   if(!three) return;
-  if(envData.courtColor){
-    three.courtMat.color.set(envData.courtColor);
-    document.getElementById('courtColorInput').value = envData.courtColor;
-  }
-  if(envData.markColor){
-    three.lineMat.color.set(envData.markColor);
-    three.markMat.color.set(envData.markColor);
-    document.getElementById('markColorInput').value = envData.markColor;
+  if(envData.areaColor){
+    three.areaMat.color.set(envData.areaColor);
+    document.getElementById('areaColorInput').value = envData.areaColor;
   }
   if(envData.sides){
     const map = {stand1:'toggleStand1', stand2:'toggleStand2', bench1:'toggleBench1', bench2:'toggleBench2'};
