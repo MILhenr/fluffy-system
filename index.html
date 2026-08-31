@@ -77,6 +77,8 @@
       <div class="sep"></div>
       <button id="randomBtn" class="iconbtn warn"><span class="ic">🎲</span>ALEATÓRIO</button>
       <button id="randomPlayBtn" class="iconbtn warn"><span class="ic">⚔️</span>ALEATÓRIO JOGADA</button>
+      <button id="remixBtn" class="iconbtn warn"><span class="ic">🧩</span>Remontar jogadas</button>
+      <button id="patternPlayBtn" class="iconbtn warn"><span class="ic">📊</span>Jogada com padrão</button>
       <button id="goto3D" class="iconbtn primary"><span class="ic">🎬</span>Ver 3D</button>
       <span id="status"></span>
     </div>
@@ -143,6 +145,15 @@
       <label class="txt" style="display:flex;align-items:center;gap:8px;cursor:pointer;">🎯 Cor das áreas
         <input type="color" id="areaColorInput" value="#2f6fb0" style="width:34px;height:28px;border:none;background:none;padding:0;cursor:pointer;">
       </label>
+      <label class="txt" style="display:flex;align-items:center;gap:8px;cursor:pointer;">👕 Uniforme azul
+        <input type="color" id="uniformBlueInput" value="#3a5fd0" style="width:34px;height:28px;border:none;background:none;padding:0;cursor:pointer;">
+      </label>
+      <label class="txt" style="display:flex;align-items:center;gap:8px;cursor:pointer;">👕 Uniforme vermelho
+        <input type="color" id="uniformRedInput" value="#c0392b" style="width:34px;height:28px;border:none;background:none;padding:0;cursor:pointer;">
+      </label>
+      <label class="txt" style="display:flex;align-items:center;gap:10px;cursor:pointer;">☀️ Brilho
+        <input type="range" id="brightnessInput" min="50" max="200" value="115" style="width:90px;">
+      </label>
       <div class="sep"></div>
       <button id="saveEnvBtn" class="txt primary">💾 Salvar ambiente</button>
       <button id="loadEnvBtn" class="txt">📂 Ambientes</button>
@@ -174,6 +185,13 @@
           <div></div>
         </div>
         <button id="passBtn" style="pointer-events:auto;width:88px;height:88px;border-radius:50%;background:#2c7a3f;border:2px solid #4aa862;color:#fff;font-size:14px;font-weight:700;">⚡<br>Passe</button>
+      </div>
+      <div id="qteOverlay" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;flex-direction:column;gap:16px;background:rgba(0,0,0,0.4);z-index:40;">
+        <div id="qteResult" style="font-size:22px;font-weight:800;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,0.7);min-height:28px;"></div>
+        <button id="qteBtn" style="pointer-events:auto;width:150px;height:150px;border-radius:50%;background:#e0b84a;border:5px solid #fff;color:#111;font-size:17px;font-weight:800;box-shadow:0 0 30px rgba(224,184,74,0.6);">⚡<br>TOQUE!</button>
+        <div style="width:220px;height:12px;background:rgba(255,255,255,0.25);border-radius:6px;overflow:hidden;">
+          <div id="qteBar" style="height:100%;background:#e0b84a;width:100%;"></div>
+        </div>
       </div>
     </div>
     <div id="bottombar" style="flex-direction:column;align-items:stretch;gap:8px;padding-bottom:max(18px, env(safe-area-inset-bottom));">
@@ -558,11 +576,13 @@ function openEditPopup(entity){
   pop.innerHTML = `
     <div class="row"><input id="popNum" type="text" placeholder="Número" value="${entity.number}"></div>
     <div class="row"><input id="popName" type="text" placeholder="Nome" value="${entity.name||''}"></div>
+    <div class="row"><input id="popMark" type="text" placeholder="Marca o nº (time adversário)" value="${entity.markNumber||''}" style="width:160px;"></div>
     <div class="row"><button id="popOk">OK</button></div>`;
   document.body.appendChild(pop);
   document.getElementById('popOk').onclick = ()=>{
     entity.number = document.getElementById('popNum').value || entity.number;
     entity.name = document.getElementById('popName').value;
+    entity.markNumber = document.getElementById('popMark').value.trim();
     pop.remove(); draw(); refreshPovSelect();
   };
 }
@@ -835,9 +855,18 @@ document.getElementById('randomPlayBtn').onclick = ()=>{
       next[e.id] = {x:clamp01(p.x+lateral), y:clamp01(p.y-adv), facingAngle:p.facingAngle, customFacing:false};
     });
 
-    // defesa: o mais próximo fecha marcação em cima do portador, os outros recompõem
-    let nearest = null, nearestDist = Infinity;
+    // defesa: quem tem marcação fixa (número definido) persegue esse jogador
+    // específico; entre os sem marcação, o mais próximo do portador fecha, e
+    // os outros recompõem cobrindo espaço
+    const explicitMarks = {};
     reds.forEach(e=>{
+      if(!e.markNumber) return;
+      const target = blues.find(b=>String(b.number)===String(e.markNumber));
+      if(target) explicitMarks[e.id] = target;
+    });
+    const freeReds = reds.filter(e=>!explicitMarks[e.id]);
+    let nearest = null, nearestDist = Infinity;
+    freeReds.forEach(e=>{
       const p = prev[e.id];
       const d = Math.hypot(p.x-cx, p.y-cy);
       if(d<nearestDist){ nearestDist=d; nearest=e; }
@@ -845,7 +874,13 @@ document.getElementById('randomPlayBtn').onclick = ()=>{
     reds.forEach(e=>{
       const p = prev[e.id];
       let tx, ty;
-      if(nearest && e.id===nearest.id){
+      if(explicitMarks[e.id]){
+        const tgt = explicitMarks[e.id];
+        const tgtPos = next[tgt.id] || prev[tgt.id];
+        const closeFactor = 0.6;
+        tx = p.x + (tgtPos.x-p.x)*closeFactor;
+        ty = p.y + (tgtPos.y-p.y)*closeFactor;
+      } else if(nearest && e.id===nearest.id){
         const closeFactor = 0.55; // fecha em cima, mas não gruda 100%
         tx = p.x + (cx-p.x)*closeFactor;
         ty = p.y + (cy-p.y)*closeFactor;
@@ -870,6 +905,248 @@ document.getElementById('randomPlayBtn').onclick = ()=>{
   document.getElementById('goto3D').click();
 };
 
+document.getElementById('remixBtn').onclick = async ()=>{
+  const index = await ensureMovementsIndex();
+  if(index.length===0){
+    alert('Você ainda não tem jogadas salvas pra remontar. Salva algumas primeiro com "🏃 Salvar jogada".');
+    return;
+  }
+  const shuffled = index.slice().sort(()=>Math.random()-0.5).slice(0, Math.min(3, index.length));
+  const picked = [];
+  for(const item of shuffled){
+    try{ const r = await storageGet(item.key); if(r && r.value) picked.push(JSON.parse(r.value)); }catch(e){}
+  }
+  if(picked.length===0){ alert('Não consegui carregar as jogadas salvas.'); return; }
+
+  const blues = entities.filter(e=>e.team==='blue');
+  const reds = entities.filter(e=>e.team==='red');
+  const ball = entities.find(e=>e.team==='ball');
+  if(blues.length===0 || reds.length===0){
+    alert('Precisa ter jogadores azuis e vermelhos em quadra pra remontar uma jogada.');
+    return;
+  }
+
+  // pega pedaços de etapas de cada jogada salva e aplica no seu time atual
+  // (1º azul salvo -> 1º azul de agora, e assim por diante)
+  const newSteps = [];
+  picked.forEach(mv=>{
+    const savedBlues = (mv.entities||[]).filter(e=>e.team==='blue');
+    const savedReds = (mv.entities||[]).filter(e=>e.team==='red');
+    const savedBall = (mv.entities||[]).find(e=>e.team==='ball');
+    const mvSteps = mv.steps || [];
+    if(mvSteps.length===0 || savedBlues.length===0 || savedReds.length===0) return;
+    const chunk = Math.max(1, Math.floor(mvSteps.length/picked.length));
+    const startIdx = Math.floor(Math.random()*Math.max(1, mvSteps.length-chunk));
+    const segment = mvSteps.slice(startIdx, startIdx+chunk);
+    segment.forEach(st=>{
+      const positions = {};
+      blues.forEach((e,i)=>{
+        const src = savedBlues[i % savedBlues.length];
+        const p = src && st.positions[src.id];
+        if(p) positions[e.id] = {...p};
+      });
+      reds.forEach((e,i)=>{
+        const src = savedReds[i % savedReds.length];
+        const p = src && st.positions[src.id];
+        if(p) positions[e.id] = {...p};
+      });
+      if(ball && savedBall && st.positions[savedBall.id]) positions[ball.id] = {...st.positions[savedBall.id]};
+      newSteps.push({positions});
+    });
+  });
+
+  if(newSteps.length<2){ alert('Não deu pra montar etapas suficientes dessas jogadas salvas.'); return; }
+  steps = newSteps;
+  currentStep = 0;
+  recomputeAllStepsAutoFacing();
+  updateStepUI(); draw();
+  const status = document.getElementById('status');
+  status.textContent = `✓ remontado de ${picked.length} jogada(s)`;
+  setTimeout(()=>status.textContent='', 2500);
+};
+
+// ---------------------------------------------------------------------------
+// PADRÃO ESTATÍSTICO: analisa uma amostra das jogadas salvas e extrai médias
+// reais (avanço do portador, fechamento da marcação, apoio dos atacantes)
+// pra usar na geração de jogadas novas, em vez de números aleatórios soltos.
+// ---------------------------------------------------------------------------
+async function analyzeSavedPatterns(maxSamples=40){
+  const index = await ensureMovementsIndex();
+  if(index.length===0) return null;
+  const sample = index.slice().sort(()=>Math.random()-0.5).slice(0, Math.min(maxSamples, index.length));
+  const acc = {advances:[], drifts:[], supportAdvances:[], supportLaterals:[], closeFactors:[], stepCounts:[], startBlueY:[], startRedY:[]};
+
+  for(const item of sample){
+    let mv;
+    try{ const r = await storageGet(item.key); if(!r||!r.value) continue; mv = JSON.parse(r.value); }catch(e){ continue; }
+    const ents = mv.entities || [], mvSteps = mv.steps || [];
+    if(mvSteps.length<2) continue;
+    acc.stepCounts.push(mvSteps.length);
+    const blues = ents.filter(e=>e.team==='blue');
+    const reds = ents.filter(e=>e.team==='red');
+    const ball = ents.find(e=>e.team==='ball');
+    if(blues.length===0) continue;
+    const s0 = mvSteps[0].positions;
+    blues.forEach(b=>{ if(s0[b.id]) acc.startBlueY.push(s0[b.id].y); });
+    reds.forEach(r2=>{ if(s0[r2.id]) acc.startRedY.push(s0[r2.id].y); });
+
+    for(let i=1;i<mvSteps.length;i++){
+      const prev = mvSteps[i-1].positions, cur = mvSteps[i].positions;
+      let carrier=null, bestD=Infinity;
+      const ballPos = ball && cur[ball.id];
+      blues.forEach(b=>{
+        const p = cur[b.id]; if(!p||!ballPos) return;
+        const d = Math.hypot(p.x-ballPos.x, p.y-ballPos.y);
+        if(d<bestD){ bestD=d; carrier=b; }
+      });
+      if(carrier && prev[carrier.id] && cur[carrier.id]){
+        const dy = prev[carrier.id].y - cur[carrier.id].y;
+        const dx = cur[carrier.id].x - prev[carrier.id].x;
+        if(Math.abs(dy)<0.5) acc.advances.push(dy);
+        if(Math.abs(dx)<0.5) acc.drifts.push(dx);
+      }
+      blues.forEach(b=>{
+        if(carrier && b.id===carrier.id) return;
+        if(prev[b.id] && cur[b.id]){
+          const dy = prev[b.id].y - cur[b.id].y;
+          const dx = cur[b.id].x - prev[b.id].x;
+          if(Math.abs(dy)<0.5) acc.supportAdvances.push(dy);
+          if(Math.abs(dx)<0.5) acc.supportLaterals.push(Math.abs(dx));
+        }
+      });
+      if(carrier && cur[carrier.id]){
+        let nd=null, ndist=Infinity;
+        reds.forEach(rd=>{
+          const p = prev[rd.id]; if(!p) return;
+          const d = Math.hypot(p.x-cur[carrier.id].x, p.y-cur[carrier.id].y);
+          if(d<ndist){ ndist=d; nd=rd; }
+        });
+        if(nd && prev[nd.id] && cur[nd.id]){
+          const before=prev[nd.id], after=cur[nd.id], tgt=cur[carrier.id];
+          const distBefore = Math.hypot(before.x-tgt.x, before.y-tgt.y);
+          const distAfter = Math.hypot(after.x-tgt.x, after.y-tgt.y);
+          if(distBefore>0.001){
+            const cf = 1-(distAfter/distBefore);
+            if(cf>-1 && cf<1.5) acc.closeFactors.push(cf);
+          }
+        }
+      }
+    }
+  }
+  function avg(arr, fb){ return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : fb; }
+  function stdev(arr, fb){ if(arr.length<2) return fb; const m=avg(arr,0); return Math.sqrt(arr.reduce((a,b)=>a+(b-m)*(b-m),0)/arr.length); }
+  return {
+    sampleSize: sample.length,
+    avgAdvance: Math.max(0.02, avg(acc.advances, 0.09)), advanceStd: stdev(acc.advances, 0.05),
+    avgDrift: avg(acc.drifts, 0), driftStd: stdev(acc.drifts, 0.08),
+    avgSupportAdvance: avg(acc.supportAdvances, 0.055),
+    avgSupportLateral: Math.max(0.01, avg(acc.supportLaterals, 0.03)),
+    avgCloseFactor: Math.max(0.2, Math.min(0.9, avg(acc.closeFactors, 0.55))),
+    avgStepCount: Math.round(avg(acc.stepCounts, 6)),
+    avgStartBlueY: avg(acc.startBlueY, 0.8),
+    avgStartRedY: avg(acc.startRedY, 0.3)
+  };
+}
+
+document.getElementById('patternPlayBtn').onclick = async ()=>{
+  const btn = document.getElementById('patternPlayBtn');
+  btn.disabled = true;
+  const status = document.getElementById('status');
+  status.textContent = 'analisando jogadas salvas...';
+  const stats = await analyzeSavedPatterns(40);
+  btn.disabled = false;
+  if(!stats){
+    status.textContent = '';
+    alert('Sem jogadas salvas suficientes pra analisar padrão. Salva algumas primeiro com "🏃 Salvar jogada".');
+    return;
+  }
+
+  let ball = entities.find(e=>e.team==='ball');
+  if(!ball){ const id=idCounter++; ball={id,team:'ball',number:'',name:''}; entities.push(ball); }
+  const blues = entities.filter(e=>e.team==='blue');
+  const reds = entities.filter(e=>e.team==='red');
+  if(blues.length===0 || reds.length===0){
+    status.textContent='';
+    alert('Precisa ter pelo menos 1 jogador azul e 1 vermelho em quadra.');
+    return;
+  }
+  const clamp01 = v => Math.max(0.05, Math.min(0.95, v));
+
+  steps = [{positions:{}}];
+  currentStep = 0;
+  blues.forEach((e,i)=>{
+    const x = blues.length>1 ? 0.15+(i/(blues.length-1))*0.7 : 0.5;
+    steps[0].positions[e.id] = {x:clamp01(x+(Math.random()-0.5)*0.06), y:clamp01(stats.avgStartBlueY+(Math.random()-0.5)*0.1), facingAngle:-Math.PI/2, customFacing:false};
+  });
+  reds.forEach((e,i)=>{
+    const x = reds.length>1 ? 0.15+(i/(reds.length-1))*0.7 : 0.5;
+    steps[0].positions[e.id] = {x:clamp01(x+(Math.random()-0.5)*0.06), y:clamp01(stats.avgStartRedY+(Math.random()-0.5)*0.1), facingAngle:Math.PI/2, customFacing:false};
+  });
+  const carrier = blues[Math.floor(Math.random()*blues.length)];
+  steps[0].positions[ball.id] = {x:steps[0].positions[carrier.id].x, y:clamp01(steps[0].positions[carrier.id].y-0.03)};
+
+  const NUM_STEPS = Math.max(3, Math.min(12, stats.avgStepCount));
+  for(let s=1; s<=NUM_STEPS; s++){
+    const prev = steps[s-1].positions;
+    const next = {};
+    const cp = prev[carrier.id];
+    const advance = Math.max(0.02, stats.avgAdvance + (Math.random()-0.5)*stats.advanceStd*2);
+    const drift = stats.avgDrift + (Math.random()-0.5)*stats.driftStd*2;
+    const cx = clamp01(cp.x+drift), cy = clamp01(cp.y-advance);
+    next[carrier.id] = {x:cx, y:cy, facingAngle:cp.facingAngle, customFacing:false};
+    next[ball.id] = {x:cx, y:clamp01(cy+0.02)};
+
+    blues.forEach(e=>{
+      if(e.id===carrier.id) return;
+      const p = prev[e.id];
+      const adv = Math.max(0, stats.avgSupportAdvance + (Math.random()-0.5)*0.05);
+      const lateral = (Math.random()-0.5)*stats.avgSupportLateral*2;
+      next[e.id] = {x:clamp01(p.x+lateral), y:clamp01(p.y-adv), facingAngle:p.facingAngle, customFacing:false};
+    });
+
+    const explicitMarks = {};
+    reds.forEach(e=>{
+      if(!e.markNumber) return;
+      const t = blues.find(b=>String(b.number)===String(e.markNumber));
+      if(t) explicitMarks[e.id] = t;
+    });
+    const freeReds = reds.filter(e=>!explicitMarks[e.id]);
+    let nearest=null, nearestDist=Infinity;
+    freeReds.forEach(e=>{
+      const p = prev[e.id];
+      const d = Math.hypot(p.x-cx, p.y-cy);
+      if(d<nearestDist){ nearestDist=d; nearest=e; }
+    });
+    reds.forEach(e=>{
+      const p = prev[e.id];
+      let tx, ty;
+      if(explicitMarks[e.id]){
+        const tgt = explicitMarks[e.id];
+        const tgtPos = next[tgt.id] || prev[tgt.id];
+        const cf = stats.avgCloseFactor;
+        tx = p.x + (tgtPos.x-p.x)*cf; ty = p.y + (tgtPos.y-p.y)*cf;
+      } else if(nearest && e.id===nearest.id){
+        const cf = stats.avgCloseFactor;
+        tx = p.x + (cx-p.x)*cf; ty = p.y + (cy-p.y)*cf;
+      } else {
+        tx = p.x + (Math.random()-0.5)*0.05;
+        ty = p.y - 0.015 + Math.random()*0.03;
+      }
+      next[e.id] = {x:clamp01(tx), y:clamp01(ty), facingAngle:p.facingAngle, customFacing:false};
+    });
+
+    steps.push({positions:next});
+  }
+
+  recomputeAllStepsAutoFacing();
+  currentStep = 0;
+  selectedId = carrier.id;
+  updateStepUI(); draw();
+  status.textContent = `✓ jogada gerada a partir do padrão de ${stats.sampleSize} jogada(s) salva(s)`;
+  setTimeout(()=>status.textContent='', 3500);
+  document.getElementById('goto3D').click();
+};
+
 // ---------------------------------------------------------------------------
 // JOGADAS SALVAS (biblioteca com nome, permanente — diferente do "Salvar"
 // rápido acima, que só guarda um rascunho único).
@@ -881,6 +1158,40 @@ function openModal(innerHTML){
   document.body.appendChild(overlay);
   overlay.addEventListener('click', (e)=>{ if(e.target===overlay) overlay.remove(); });
   return overlay;
+}
+
+const MOVEMENTS_INDEX_KEY = 'movements_index';
+async function getMovementsIndex(){
+  try{
+    const r = await storageGet(MOVEMENTS_INDEX_KEY);
+    if(r && r.value) return JSON.parse(r.value);
+  }catch(e){}
+  return null;
+}
+async function saveMovementsIndex(index){
+  await storageSet(MOVEMENTS_INDEX_KEY, JSON.stringify(index));
+}
+// migração única: se o índice ainda não existe mas já tem jogadas salvas do
+// jeito antigo, reconstrói o índice a partir delas (não perde nada)
+async function ensureMovementsIndex(){
+  let index = await getMovementsIndex();
+  if(index) return index;
+  index = [];
+  try{
+    const listRes = await storageList('movement_');
+    const keys = (listRes && listRes.keys) || [];
+    for(const k of keys){
+      try{
+        const r = await storageGet(k);
+        if(r && r.value){
+          const d = JSON.parse(r.value);
+          index.push({key:k, name:d.name||'Sem nome', savedAt:d.savedAt||0, stepCount:(d.steps||[]).length});
+        }
+      }catch(e){}
+    }
+  }catch(e){}
+  await saveMovementsIndex(index);
+  return index;
 }
 
 document.getElementById('saveMovementBtn').onclick = ()=>{
@@ -897,15 +1208,19 @@ document.getElementById('saveMovementBtn').onclick = ()=>{
     const nameInput = document.getElementById('movementNameInput').value.trim();
     const name = nameInput || `Jogada ${new Date().toLocaleString('pt-BR')}`;
     const key = 'movement_'+Date.now();
-    const data = JSON.stringify({name, entities, steps, nextBlueNum, nextRedNum, savedAt: Date.now()});
+    const savedAt = Date.now();
+    const data = JSON.stringify({name, entities, steps, nextBlueNum, nextRedNum, savedAt});
     const btn = document.getElementById('movementConfirmBtn');
     btn.textContent = 'Salvando...'; btn.disabled = true;
     try{
       await storageSet(key, data);
+      const index = await ensureMovementsIndex();
+      index.push({key, name, savedAt, stepCount: steps.length});
+      await saveMovementsIndex(index);
       overlay.remove();
       const status = document.getElementById('status');
-      status.textContent = '✓ jogada salva';
-      setTimeout(()=>status.textContent='', 2000);
+      status.textContent = `✓ jogada salva (${index.length} no total)`;
+      setTimeout(()=>status.textContent='', 2500);
     }catch(e){
       console.error(e);
       btn.textContent = 'Erro: ' + (e && e.message ? e.message : 'tentar de novo');
@@ -920,39 +1235,36 @@ document.getElementById('loadMovementBtn').onclick = async ()=>{
   document.getElementById('movementListCloseBtn').onclick = ()=> overlay.remove();
   const area = document.getElementById('movementListArea');
   try{
-    const listRes = await storageList('movement_');
-    const keys = (listRes && listRes.keys) || [];
-    if(keys.length===0){ area.textContent = 'Nenhuma jogada salva ainda.'; return; }
-    const items = [];
-    for(const k of keys){
-      try{
-        const r = await storageGet(k);
-        if(r && r.value) items.push({key:k, data: JSON.parse(r.value)});
-      }catch(e){}
-    }
-    items.sort((a,b)=> (b.data.savedAt||0)-(a.data.savedAt||0));
+    const index = await ensureMovementsIndex();
+    if(index.length===0){ area.textContent = 'Nenhuma jogada salva ainda.'; return; }
+    const items = index.slice().sort((a,b)=> (b.savedAt||0)-(a.savedAt||0));
     area.innerHTML = '';
-    if(items.length===0){ area.textContent = 'Nenhuma jogada salva ainda.'; return; }
     items.forEach(item=>{
       const row = document.createElement('div');
       row.className = 'movementItem';
-      const dateStr = item.data.savedAt ? new Date(item.data.savedAt).toLocaleDateString('pt-BR') : '';
-      const stepCount = (item.data.steps||[]).length;
-      row.innerHTML = `<div><span class="mname">${item.data.name || 'Sem nome'}</span><span class="mdate">${stepCount} etapas · ${dateStr}</span></div>
+      const dateStr = item.savedAt ? new Date(item.savedAt).toLocaleDateString('pt-BR') : '';
+      row.innerHTML = `<div><span class="mname">${item.name || 'Sem nome'}</span><span class="mdate">${item.stepCount||0} etapas · ${dateStr}</span></div>
         <div style="display:flex;gap:6px;">
           <button class="loadBtn">Carregar</button>
           <button class="del">🗑</button>
         </div>`;
-      row.querySelector('.loadBtn').onclick = ()=>{
-        entities = item.data.entities || [];
-        steps = (item.data.steps && item.data.steps.length) ? item.data.steps : [{positions:{}}];
-        currentStep = 0;
-        nextBlueNum = item.data.nextBlueNum || 1; nextRedNum = item.data.nextRedNum || 1;
-        idCounter = Math.max(1, ...entities.map(e=>e.id+1), 1);
-        document.getElementById('addBall').disabled = !!entities.find(e=>e.team==='ball');
-        recomputeAllStepsAutoFacing();
-        updateStepUI(); draw(); refreshPovSelect();
-        overlay.remove();
+      row.querySelector('.loadBtn').onclick = async ()=>{
+        const loadBtn = row.querySelector('.loadBtn');
+        loadBtn.textContent = '...'; loadBtn.disabled = true;
+        try{
+          const r = await storageGet(item.key);
+          if(!r || !r.value){ loadBtn.textContent = 'Erro'; return; }
+          const data = JSON.parse(r.value);
+          entities = data.entities || [];
+          steps = (data.steps && data.steps.length) ? data.steps : [{positions:{}}];
+          currentStep = 0;
+          nextBlueNum = data.nextBlueNum || 1; nextRedNum = data.nextRedNum || 1;
+          idCounter = Math.max(1, ...entities.map(e=>e.id+1), 1);
+          document.getElementById('addBall').disabled = !!entities.find(e=>e.team==='ball');
+          recomputeAllStepsAutoFacing();
+          updateStepUI(); draw(); refreshPovSelect();
+          overlay.remove();
+        }catch(e){ console.error(e); loadBtn.textContent = 'Erro'; loadBtn.disabled = false; }
       };
       row.querySelector('.del').onclick = async (ev)=>{
         const delBtn = ev.currentTarget;
@@ -961,7 +1273,15 @@ document.getElementById('loadMovementBtn').onclick = async ()=>{
           delBtn.dataset.confirming = '1';
           return;
         }
-        try{ await storageDelete(item.key); row.remove(); }catch(e){ console.error(e); }
+        try{
+          await storageDelete(item.key);
+          const idx2 = await getMovementsIndex();
+          if(idx2){
+            const filtered = idx2.filter(x=>x.key!==item.key);
+            await saveMovementsIndex(filtered);
+          }
+          row.remove();
+        }catch(e){ console.error(e); }
       };
       area.appendChild(row);
     });
@@ -1028,6 +1348,7 @@ layoutCanvas();
    PARTE 2 — REPRODUÇÃO 3D (three.js)
    ========================================================================= */
 let three = null;
+const TEAM_COLORS = {blue: 0x3a5fd0, red: 0xc0392b};
 
 function toWorld(fx, fy){
   return new THREE.Vector3((fy-0.5)*COURT_LEN, 0, -(fx-0.5)*COURT_WID);
@@ -1132,7 +1453,7 @@ function makeSoccerBallTexture(){
 
 function makePlayerMesh(team, numberText, heightM){
   const g = new THREE.Group();
-  const color = team==='blue' ? 0x3a5fd0 : team==='red' ? 0xc0392b : 0xaaaaaa;
+  const color = TEAM_COLORS[team] || 0xaaaaaa;
   const mat = new THREE.MeshLambertMaterial({color});
   const skinMat = new THREE.MeshLambertMaterial({color:0xd8a878});
   const shortsMat = new THREE.MeshLambertMaterial({color:0xf2f2f2});
@@ -1199,7 +1520,7 @@ function makePlayerMesh(team, numberText, heightM){
     forearm.position.y = -0.135; elbowPivot.add(forearm);
     torsoPivot.add(armPivot); arms.push(armPivot); elbows.push(elbowPivot);
   }
-  g.userData.rig = {torsoPivot, legs, arms, knees, elbows};
+  g.userData.rig = {torsoPivot, legs, arms, knees, elbows, jerseyMat:mat, team};
   // só as peças principais (tronco, coxa, canela) projetam sombra — reduz
   // bastante o custo com vários jogadores em quadra, sem perder a silhueta
   torsoMesh.castShadow = true;
@@ -1356,6 +1677,43 @@ function initThree(){
   // ---- arquibancada de verdade (fileiras), dos dois lados — cada lado pode
   // ser ligado/desligado independente, e cada lado também pode ter um banco
   // de reservas em vez de (ou junto com) a arquibancada.
+  function buildCrowd(zSign, rows, rowH, rowD, spanL){
+    const group = new THREE.Group();
+    const colors = [0xd4453b,0x3b6bd4,0xe0c341,0x3bd47a,0xd4893b,0xf2f2f2,0x8a4fd4];
+    const seatSpacing = 0.55;
+    const seatsPerRow = Math.max(1, Math.floor((spanL*2)/seatSpacing));
+    const assignments = [];
+    const perColorCounts = {};
+    for(let r=0;r<rows;r++){
+      for(let i=0;i<seatsPerRow;i++){
+        if(Math.random()<0.3) continue; // assentos vazios, pra variar
+        const colorIdx = Math.floor(Math.random()*colors.length);
+        assignments.push({r,i,colorIdx});
+        perColorCounts[colorIdx] = (perColorCounts[colorIdx]||0)+1;
+      }
+    }
+    const geo = new THREE.BoxGeometry(0.3,0.5,0.3);
+    const meshesByColor = {};
+    Object.keys(perColorCounts).forEach(ci=>{
+      const mat = new THREE.MeshLambertMaterial({color:colors[ci]});
+      const im = new THREE.InstancedMesh(geo, mat, perColorCounts[ci]);
+      im.count = 0;
+      meshesByColor[ci] = im;
+      group.add(im);
+    });
+    const dummy = new THREE.Object3D();
+    assignments.forEach(({r,i,colorIdx})=>{
+      const im = meshesByColor[colorIdx];
+      const x = -spanL + i*seatSpacing + (Math.random()-0.5)*0.15;
+      const z = zSign*(HW + 0.6 + r*rowD);
+      dummy.position.set(x, rowH*(r+1) + 0.25, z);
+      dummy.rotation.y = Math.random()*Math.PI*2;
+      dummy.updateMatrix();
+      im.setMatrixAt(im.count++, dummy.matrix);
+    });
+    Object.values(meshesByColor).forEach(im=>{ im.instanceMatrix.needsUpdate = true; });
+    return group;
+  }
   function buildBleachers(zSign){
     const rows = 6, rowH = 0.42, rowD = 0.8;
     const seatMat = new THREE.MeshLambertMaterial({color:0x2c2c2c});
@@ -1367,6 +1725,7 @@ function initThree(){
       step.receiveShadow = true;
       group.add(step);
     }
+    group.add(buildCrowd(zSign, rows, rowH, rowD, spanL));
     return group;
   }
   function buildBench(zSign){
@@ -1545,10 +1904,14 @@ function renderControlFrame(dt){
   const rightDir = new THREE.Vector3(Math.sin(yaw+Math.PI/2),0,-Math.cos(yaw+Math.PI/2));
 
   const moveVec = new THREE.Vector3();
-  if(moveInput.fwd) moveVec.add(fwdDir);
-  if(moveInput.back) moveVec.sub(fwdDir);
-  if(moveInput.right) moveVec.add(rightDir);
-  if(moveInput.left) moveVec.sub(rightDir);
+  // durante o QTE o jogador fica "travado" na disputa, sem se mover livremente
+  const qteActive = three.qte && !three.qte.resolved;
+  if(!qteActive){
+    if(moveInput.fwd) moveVec.add(fwdDir);
+    if(moveInput.back) moveVec.sub(fwdDir);
+    if(moveInput.right) moveVec.add(rightDir);
+    if(moveInput.left) moveVec.sub(rightDir);
+  }
   let speed = 0;
   if(moveVec.lengthSq()>0){
     moveVec.normalize();
@@ -1559,13 +1922,42 @@ function renderControlFrame(dt){
   three.manualPos.x = Math.max(-HLc, Math.min(HLc, three.manualPos.x));
   three.manualPos.z = Math.max(-HWc, Math.min(HWc, three.manualPos.z));
 
+  // ---- detecta disputa: bola no seu pé + defensor perto = dispara o QTE ----
+  if(!three.qte && (!three.qteCooldownUntil || performance.now()>three.qteCooldownUntil) && !three.passAnim && three.manualBallPos){
+    const carryingBall = three.manualBallPos.distanceTo(three.manualPos) < 1.2;
+    if(carryingBall){
+      let closestId = null, closestDist = Infinity;
+      three.snap.entities.forEach(e=>{
+        if(e.id===three.povId || e.team==='ball' || e.team===povEntity.team) return;
+        const fp = three.frozenPositions[e.id];
+        if(!fp) return;
+        const d = fp.distanceTo(three.manualPos);
+        if(d<closestDist){ closestDist=d; closestId=e.id; }
+      });
+      if(closestId!=null && closestDist<1.8){
+        three.qte = {defenderId:closestId, start:performance.now(), duration:900, resolved:false};
+        document.getElementById('qteOverlay').style.display = 'flex';
+        document.getElementById('qteResult').textContent = '';
+        document.getElementById('qteBar').style.width = '100%';
+      }
+    }
+  }
+  if(three.qte && !three.qte.resolved){
+    const elapsed = performance.now() - three.qte.start;
+    const remain = Math.max(0, 1 - elapsed/three.qte.duration);
+    document.getElementById('qteBar').style.width = (remain*100)+'%';
+    if(elapsed>=three.qte.duration) resolveQTE(false);
+  }
+
   const eyeHeight = 1.68;
   const basePos = three.manualPos.clone(); basePos.y = eyeHeight;
   const spdFrac = Math.min(speed/9.2,1);
   const bobFreq = 1.9 + spdFrac*2.6;
   const phase = performance.now()/1000*bobFreq*Math.PI*2 + three.shakeSeed;
-  const bobAmt = 0.03 + spdFrac*0.22;
-  const swayAmt = 0.012 + spdFrac*0.075;
+  // câmera fica bem mais nervosa durante a disputa (QTE)
+  const qteBoost = qteActive ? 2.4 : 0;
+  const bobAmt = (0.03 + spdFrac*0.22) * (1+qteBoost);
+  const swayAmt = (0.012 + spdFrac*0.075) * (1+qteBoost);
   basePos.y += Math.sin(phase)*bobAmt;
   basePos.x += Math.cos(phase*0.5)*swayAmt;
   three.camera.position.copy(basePos);
@@ -1765,9 +2157,13 @@ document.getElementById('controlModeBtn').onclick = ()=>{
       else three.frozenPositions[e.id] = s.pos.clone();
     });
     three.passAnim = null;
+    three.qte = null; three.qteCooldownUntil = 0;
+    document.getElementById('qteOverlay').style.display = 'none';
     three.freeLookYaw = 0; three.freeLookPitch = 0;
   } else {
     moveInput = {fwd:false, back:false, left:false, right:false};
+    three.qte = null;
+    document.getElementById('qteOverlay').style.display = 'none';
     startCameraTransition();
   }
 };
@@ -1793,6 +2189,30 @@ document.getElementById('passBtn').addEventListener('click', ()=>{
   const dist = from.distanceTo(to);
   three.passAnim = {from, to, start: performance.now(), duration: Math.max(200, (dist/BALL_SPEED)*1000)};
 });
+
+function resolveQTE(success){
+  if(!three.qte || three.qte.resolved) return;
+  three.qte.resolved = true;
+  const resultEl = document.getElementById('qteResult');
+  resultEl.textContent = success ? '✅ Passou!' : '❌ Perdeu a bola!';
+  resultEl.style.color = success ? '#4ade80' : '#ff6b6b';
+  if(!success && three.manualPos){
+    const stolenDir = new THREE.Vector3((Math.random()-0.5), 0, (Math.random()-0.5));
+    if(stolenDir.lengthSq()<0.001) stolenDir.set(1,0,0);
+    stolenDir.normalize();
+    three.manualBallPos = three.manualPos.clone().add(stolenDir.multiplyScalar(2.2));
+  }
+  setTimeout(()=>{
+    const el = document.getElementById('qteOverlay');
+    if(el) el.style.display = 'none';
+    three.qte = null;
+    three.qteCooldownUntil = performance.now() + 1500;
+  }, 700);
+}
+document.getElementById('qteBtn').addEventListener('click', ()=>{
+  if(three && three.qte && !three.qte.resolved) resolveQTE(true);
+});
+
 document.getElementById('povSelect').addEventListener('change', (e)=>{
   three.povId = parseInt(e.target.value);
   selectedId = three.povId;
@@ -2000,6 +2420,25 @@ document.getElementById('bgFloorInput').addEventListener('change', (ev)=>{
 document.getElementById('areaColorInput').addEventListener('input', (e)=>{
   if(!three || !three.areaMat) return;
   three.areaMat.color.set(e.target.value);
+});
+
+function recolorTeam(team, hexValue){
+  TEAM_COLORS[team] = parseInt(hexValue.replace('#','0x'));
+  if(!three) return;
+  three.snap.entities.forEach(en=>{
+    if(en.team!==team) return;
+    const mesh = three.meshes[en.id];
+    if(mesh && mesh.userData.rig && mesh.userData.rig.jerseyMat){
+      mesh.userData.rig.jerseyMat.color.set(hexValue);
+    }
+  });
+}
+document.getElementById('uniformBlueInput').addEventListener('input', (e)=> recolorTeam('blue', e.target.value));
+document.getElementById('uniformRedInput').addEventListener('input', (e)=> recolorTeam('red', e.target.value));
+
+document.getElementById('brightnessInput').addEventListener('input', (e)=>{
+  if(!three) return;
+  three.renderer.toneMappingExposure = parseInt(e.target.value)/100;
 });
 
 function wireSideToggle(btnId, meshKey){
