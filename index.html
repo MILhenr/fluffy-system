@@ -188,11 +188,18 @@
           <button id="pivotPassBtn" style="width:88px;height:56px;border-radius:16px;background:#7a3a2c;border:2px solid #b05a3f;color:#fff;font-size:11px;font-weight:700;line-height:1.2;">🎯 Passe<br>Pivô</button>
         </div>
       </div>
-      <div id="qteOverlay" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;flex-direction:column;gap:16px;background:rgba(0,0,0,0.4);z-index:40;">
-        <div id="qteResult" style="font-size:22px;font-weight:800;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,0.7);min-height:28px;"></div>
-        <button id="qteBtn" style="pointer-events:auto;width:150px;height:150px;border-radius:50%;background:#e0b84a;border:5px solid #fff;color:#111;font-size:17px;font-weight:800;box-shadow:0 0 30px rgba(224,184,74,0.6);">⚡<br>TOQUE!</button>
+      <div id="qteOverlay" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;flex-direction:column;gap:16px;background:rgba(0,0,0,0.45);z-index:40;padding:20px;box-sizing:border-box;">
+        <div id="qteResult" style="font-size:20px;font-weight:800;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,0.7);min-height:26px;text-align:center;"></div>
+        <div id="qteChoices" style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;pointer-events:auto;"></div>
         <div style="width:220px;height:12px;background:rgba(255,255,255,0.25);border-radius:6px;overflow:hidden;">
           <div id="qteBar" style="height:100%;background:#e0b84a;width:100%;"></div>
+        </div>
+      </div>
+      <div id="passTargetOverlay" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;z-index:45;background:rgba(0,0,0,0.55);">
+        <div style="background:#1c1c1c;border:1px solid #3a3a3a;border-radius:14px;padding:16px;max-width:300px;width:90%;">
+          <h3 style="margin:0 0 12px;color:#eee;font-size:15px;" id="passTargetTitle">Passar pra quem?</h3>
+          <div id="passTargetList" style="display:flex;flex-direction:column;gap:8px;max-height:320px;overflow-y:auto;"></div>
+          <button id="passTargetCancel" style="margin-top:12px;width:100%;padding:10px;background:#2a2a2a;border:1px solid #444;color:#eee;border-radius:8px;font-size:13px;">Cancelar</button>
         </div>
       </div>
     </div>
@@ -542,6 +549,17 @@ canvas.addEventListener('pointerdown', (ev)=>{
   selectedId = null;
   draw();
 });
+function findPairEntity(entity){
+  if(!entity || entity.team==='ball') return null;
+  if(entity.team==='red'){
+    const wanted = entity.markNumber || entity.number;
+    return entities.find(e=>e.team==='blue' && String(e.number)===String(wanted));
+  }
+  if(entity.team==='blue'){
+    return entities.find(e=>e.team==='red' && String(e.markNumber||e.number)===String(entity.number));
+  }
+  return null;
+}
 canvas.addEventListener('pointermove', (ev)=>{
   if(playing2D) return;
   const p = pointerPos(ev);
@@ -557,7 +575,19 @@ canvas.addEventListener('pointermove', (ev)=>{
   const f = toFrac(p.x,p.y);
   f.x = Math.min(1.03, Math.max(-0.03, f.x)); f.y = Math.min(1.03, Math.max(-0.03, f.y));
   const pos = steps[currentStep].positions[dragging.id];
+  const dx = f.x - pos.x, dy = f.y - pos.y;
   pos.x = f.x; pos.y = f.y;
+
+  // move o par (marcação) junto, mantendo a distância relativa que já existia
+  const pairEntity = findPairEntity(dragging);
+  if(pairEntity){
+    const pairPos = steps[currentStep].positions[pairEntity.id];
+    if(pairPos){
+      pairPos.x = Math.min(1.03, Math.max(-0.03, pairPos.x+dx));
+      pairPos.y = Math.min(1.03, Math.max(-0.03, pairPos.y+dy));
+    }
+  }
+
   recomputeAutoFacing(currentStep);
   draw();
 });
@@ -1952,10 +1982,7 @@ function renderControlFrame(dt){
         if(d<closestDist){ closestDist=d; closestId=e.id; }
       });
       if(closestId!=null && closestDist<1.8){
-        three.qte = {defenderId:closestId, start:performance.now(), duration:900, resolved:false};
-        document.getElementById('qteOverlay').style.display = 'flex';
-        document.getElementById('qteResult').textContent = '';
-        document.getElementById('qteBar').style.width = '100%';
+        startQTE(false);
       }
     }
   }
@@ -1993,7 +2020,46 @@ function renderControlFrame(dt){
     const mesh = three.meshes[e.id];
     if(!mesh) return;
     const fp = three.frozenPositions[e.id];
-    if(fp) mesh.position.copy(fp);
+    if(fp){
+      // marcadores (vermelho com par definido) perseguem de verdade quem
+      // estão marcando — inclusive o jogador que você está controlando
+      let chaseSpd = 0;
+      if(e.team==='red'){
+        const ent2D = entities.find(x=>x.id===e.id);
+        const pairEnt = ent2D ? findPairEntity(ent2D) : null;
+        if(pairEnt){
+          const targetPos = pairEnt.id===three.povId ? three.manualPos : three.frozenPositions[pairEnt.id];
+          if(targetPos){
+            const toTarget = targetPos.clone().sub(fp);
+            const dist = toTarget.length();
+            const chaseSpeed = 5.6, stopDist = 1.05;
+            if(dist>stopDist){
+              toTarget.normalize();
+              fp.add(toTarget.multiplyScalar(Math.min(chaseSpeed*dt, dist-stopDist)));
+              chaseSpd = chaseSpeed;
+            }
+            mesh.rotation.y = Math.atan2(toTarget.x, toTarget.z);
+          }
+        }
+      }
+      mesh.position.copy(fp);
+      const rig = mesh.userData.rig;
+      if(rig){
+        const spdFrac = Math.min(chaseSpd/9.2, 1);
+        const freq = 1.7 + spdFrac*2.6;
+        const amp = 0.14 + spdFrac*0.55;
+        const phase = performance.now()/1000*freq*Math.PI*2 + (e.id*1.7);
+        const swing = Math.sin(phase);
+        rig.legs[0].rotation.x = swing*amp;
+        rig.legs[1].rotation.x = -swing*amp;
+        rig.arms[0].rotation.x = -swing*amp*0.7;
+        rig.arms[1].rotation.x = swing*amp*0.7;
+        rig.torsoPivot.rotation.x = spdFrac*0.22;
+        const kneeAmp = spdFrac*0.9;
+        rig.knees[0].rotation.x = 0.1 + Math.max(0, Math.sin(phase))*kneeAmp;
+        rig.knees[1].rotation.x = 0.1 + Math.max(0, -Math.sin(phase))*kneeAmp;
+      }
+    }
     mesh.visible = true;
   });
   if(three.meshes[three.povId]) three.meshes[three.povId].visible = false;
@@ -2011,10 +2077,7 @@ function renderControlFrame(dt){
         const wasPivotPass = three.passAnim.isPivotPass;
         three.passAnim = null;
         if(wasPivotPass && (!three.qte || three.qte.resolved)){
-          three.qte = {defenderId:null, start:performance.now(), duration:900, resolved:false, pivot:true};
-          document.getElementById('qteOverlay').style.display = 'flex';
-          document.getElementById('qteResult').textContent = '';
-          document.getElementById('qteBar').style.width = '100%';
+          startQTE(true);
         }
       }
     } else if(ballMesh && three.manualBallPos){
@@ -2205,53 +2268,92 @@ wireHoldButton('moveFwdBtn','fwd');
 wireHoldButton('moveBackBtn','back');
 wireHoldButton('moveLeftBtn','left');
 wireHoldButton('moveRightBtn','right');
-document.getElementById('passBtn').addEventListener('click', ()=>{
+function getPassTargets(){
+  const povEntity = three.snap.entities.find(e=>e.id===three.povId);
+  if(!povEntity) return [];
+  return entities.filter(e=>e.team===povEntity.team && e.id!==three.povId && e.team!=='ball');
+}
+function doPass(targetId, isPivot){
   if(!three.controlMode || !three.manualPos) return;
-  const yaw = three.manualYaw + (three.freeLookYaw||0);
-  const dir = new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));
+  const targetFp = three.frozenPositions[targetId];
+  if(!targetFp) return;
   const from = (three.manualBallPos || three.manualPos).clone();
-  const to = three.manualPos.clone().add(dir.multiplyScalar(12));
+  const to = targetFp.clone();
   const dist = from.distanceTo(to);
-  three.passAnim = {from, to, start: performance.now(), duration: Math.max(200, (dist/BALL_SPEED)*1000), isPivotPass:false};
-});
-document.getElementById('pivotPassBtn').addEventListener('click', ()=>{
+  three.passAnim = {from, to, start: performance.now(), duration: Math.max(200, (dist/BALL_SPEED)*1000), isPivotPass: !!isPivot};
+}
+function openPassTargetPicker(isPivot){
   if(!three.controlMode || !three.manualPos) return;
-  const yaw = three.manualYaw + (three.freeLookYaw||0);
-  const dir = new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));
-  const from = (three.manualBallPos || three.manualPos).clone();
-  const to = three.manualPos.clone().add(dir.multiplyScalar(12));
-  const dist = from.distanceTo(to);
-  // passe pro pivô: na chegada, sempre dispara o minigame de domínio sob pressão
-  three.passAnim = {from, to, start: performance.now(), duration: Math.max(200, (dist/BALL_SPEED)*1000), isPivotPass:true};
-});
+  const overlay = document.getElementById('passTargetOverlay');
+  const list = document.getElementById('passTargetList');
+  document.getElementById('passTargetTitle').textContent = isPivot ? '🎯 Passe pivô — pra quem?' : '⚡ Passar pra quem?';
+  list.innerHTML = '';
+  const targets = getPassTargets();
+  if(targets.length===0){
+    list.innerHTML = '<div style="color:#999;font-size:13px;">Não tem outro jogador do seu time em quadra.</div>';
+  } else {
+    targets.forEach(t=>{
+      const btn = document.createElement('button');
+      btn.style.cssText = 'padding:12px;background:#2c4270;border:1px solid #3d5a95;color:#fff;border-radius:10px;font-size:14px;text-align:left;cursor:pointer;';
+      btn.textContent = `#${t.number}${t.name?' · '+t.name:''}`;
+      btn.onclick = ()=>{ overlay.style.display='none'; doPass(t.id, isPivot); };
+      list.appendChild(btn);
+    });
+  }
+  overlay.style.display = 'flex';
+}
+document.getElementById('passTargetCancel').onclick = ()=>{ document.getElementById('passTargetOverlay').style.display='none'; };
+document.getElementById('passBtn').addEventListener('click', ()=> openPassTargetPicker(false));
+document.getElementById('pivotPassBtn').addEventListener('click', ()=> openPassTargetPicker(true));
 
-function resolveQTE(success){
+// ---- minigame: sob pressão, escolha rápido pra quem passar (em vez de só tocar um botão) ----
+function startQTE(pivot){
+  const targets = getPassTargets();
+  if(targets.length===0) return; // sem time pra escolher, não dá pra montar a disputa
+  const shuffled = targets.slice().sort(()=>Math.random()-0.5).slice(0, Math.min(3, targets.length));
+  three.qte = {start:performance.now(), duration:1100, resolved:false, pivot:!!pivot};
+  const choicesEl = document.getElementById('qteChoices');
+  choicesEl.innerHTML = '';
+  shuffled.forEach(t=>{
+    const btn = document.createElement('button');
+    btn.style.cssText = 'width:92px;height:92px;border-radius:16px;background:#e0b84a;border:3px solid #fff;color:#111;font-size:15px;font-weight:800;box-shadow:0 0 20px rgba(224,184,74,0.55);cursor:pointer;';
+    btn.textContent = `#${t.number}`;
+    btn.onclick = ()=> resolveQTE(true, t.id);
+    choicesEl.appendChild(btn);
+  });
+  document.getElementById('qteOverlay').style.display = 'flex';
+  document.getElementById('qteResult').textContent = pivot ? 'PRESSÃO! Escolha rápido pra quem passar' : 'Marcado! Escolha rápido';
+  document.getElementById('qteResult').style.color = '#fff';
+  document.getElementById('qteBar').style.width = '100%';
+}
+
+function resolveQTE(success, chosenTargetId){
   if(!three.qte || three.qte.resolved) return;
   const wasPivot = !!three.qte.pivot;
   three.qte.resolved = true;
+  document.getElementById('qteChoices').innerHTML = '';
   const resultEl = document.getElementById('qteResult');
   if(success){
-    resultEl.textContent = wasPivot ? '✅ Dominou! Escolha o que fazer' : '✅ Passou!';
+    resultEl.textContent = '✅ Tocou pra frente!';
+    resultEl.style.color = '#4ade80';
+    if(chosenTargetId!=null) doPass(chosenTargetId, false);
   } else {
     resultEl.textContent = wasPivot ? '❌ Perdeu a bola no domínio!' : '❌ Perdeu a bola!';
-  }
-  resultEl.style.color = success ? '#4ade80' : '#ff6b6b';
-  if(!success && three.manualPos){
-    const stolenDir = new THREE.Vector3((Math.random()-0.5), 0, (Math.random()-0.5));
-    if(stolenDir.lengthSq()<0.001) stolenDir.set(1,0,0);
-    stolenDir.normalize();
-    three.manualBallPos = three.manualPos.clone().add(stolenDir.multiplyScalar(2.2));
+    resultEl.style.color = '#ff6b6b';
+    if(three.manualPos){
+      const stolenDir = new THREE.Vector3((Math.random()-0.5), 0, (Math.random()-0.5));
+      if(stolenDir.lengthSq()<0.001) stolenDir.set(1,0,0);
+      stolenDir.normalize();
+      three.manualBallPos = three.manualPos.clone().add(stolenDir.multiplyScalar(2.2));
+    }
   }
   setTimeout(()=>{
     const el = document.getElementById('qteOverlay');
     if(el) el.style.display = 'none';
     three.qte = null;
     three.qteCooldownUntil = performance.now() + 1500;
-  }, success && wasPivot ? 1000 : 700);
+  }, success ? 900 : 700);
 }
-document.getElementById('qteBtn').addEventListener('click', ()=>{
-  if(three && three.qte && !three.qte.resolved) resolveQTE(true);
-});
 
 document.getElementById('povSelect').addEventListener('change', (e)=>{
   three.povId = parseInt(e.target.value);
