@@ -1997,6 +1997,12 @@ function animate3D(){
     const tt = three.t;
     document.getElementById('time3DLabel').textContent = `${tt.toFixed(1)}s / ${dur.toFixed(1)}s`;
     render3DFrame(tt, dur, durs);
+    if(three.qte && !three.qte.resolved){
+      const elapsed = performance.now() - three.qte.start;
+      const remain = Math.max(0, 1 - elapsed/three.qte.duration);
+      document.getElementById('qteBar').style.width = (remain*100)+'%';
+      if(elapsed>=three.qte.duration) resolveQTE(false);
+    }
   }catch(err){
     console.error('Erro no render 3D:', err);
     showViewer3DError();
@@ -2040,6 +2046,26 @@ function triggerScriptedPivotQTE(stepIdx){
     targetId = nearestId;
   }
   if(targetId==null || !three) return;
+
+  // a resposta "certa" no minigame é pra quem a bola realmente vai depois,
+  // segundo a jogada 2D que você desenhou — olha a etapa seguinte
+  let correctTargetId = null;
+  const nextStep = steps[stepIdx+1];
+  if(nextStep){
+    const nextBallPos = nextStep.positions[ballEnt.id];
+    if(nextBallPos){
+      let nearestId=null, nearestDist=Infinity;
+      entities.forEach(e=>{
+        if(e.team==='ball' || e.id===targetId) return;
+        const p = nextStep.positions[e.id];
+        if(!p) return;
+        const d = Math.hypot(p.x-nextBallPos.x, p.y-nextBallPos.y);
+        if(d<nearestDist){ nearestDist=d; nearestId=e.id; }
+      });
+      correctTargetId = nearestId;
+    }
+  }
+
   three.playing = false;
   three.povId = targetId;
   const sel = document.getElementById('povSelect');
@@ -2047,7 +2073,7 @@ function triggerScriptedPivotQTE(stepIdx){
   selectedId = targetId;
   three.freeLookYaw = 0; three.freeLookPitch = 0;
   startCameraTransition();
-  startQTE(true);
+  startQTE(true, correctTargetId);
 }
 
 function switchControlTo(newPovId){
@@ -2125,7 +2151,7 @@ function renderControlFrame(dt){
   const bobFreq = 1.9 + spdFrac*2.6;
   const phase = performance.now()/1000*bobFreq*Math.PI*2 + three.shakeSeed;
   // câmera fica bem mais nervosa durante a disputa (QTE)
-  const qteBoost = qteActive ? 2.4 : 0;
+  const qteBoost = qteActive ? 3.2 : 0;
   const bobAmt = (0.03 + spdFrac*0.22) * (1+qteBoost);
   const swayAmt = (0.012 + spdFrac*0.075) * (1+qteBoost);
   basePos.y += Math.sin(phase)*bobAmt;
@@ -2291,8 +2317,10 @@ function render3DFrame(tt, dur, durs){
     const spdFrac = Math.min(speedA/9.2, 1);
     const bobFreq = 1.9 + spdFrac*2.6;
     const phase = tt*bobFreq*Math.PI*2 + three.shakeSeed;
-    const bobAmt = 0.03 + spdFrac*0.22;
-    const swayAmt = 0.012 + spdFrac*0.075;
+    const qteActive = three.qte && !three.qte.resolved;
+    const qteBoost = qteActive ? 3.2 : 0;
+    const bobAmt = (0.03 + spdFrac*0.22) * (1+qteBoost);
+    const swayAmt = (0.012 + spdFrac*0.075) * (1+qteBoost);
     basePos.y += Math.sin(phase)*bobAmt;
     basePos.x += Math.cos(phase*0.5)*swayAmt;
 
@@ -2303,6 +2331,7 @@ function render3DFrame(tt, dur, durs){
     const yaw = s.facingAngle + (three.freeLookYaw||0);
     const dir = new THREE.Vector3(Math.sin(yaw), 0, -Math.cos(yaw));
     let pitch = -0.03 - Math.min(speedA,8)*0.03 + (three.freeLookPitch||0);
+    if(qteActive) pitch -= 0.22; // cabeça mais pro chão durante a disputa
 
     pitch = Math.max(-1.3, Math.min(1.3, pitch));
     const target = basePos.clone().add(dir.multiplyScalar(5));
@@ -2446,22 +2475,32 @@ document.getElementById('passBtn').addEventListener('click', ()=> openPassTarget
 document.getElementById('pivotPassBtn').addEventListener('click', ()=> openPassTargetPicker(true));
 
 // ---- minigame: sob pressão, escolha rápido pra quem passar (em vez de só tocar um botão) ----
-function startQTE(pivot){
+function startQTE(pivot, correctTargetId){
   const targets = getPassTargets();
   if(targets.length===0) return; // sem time pra escolher, não dá pra montar a disputa
-  const shuffled = targets.slice().sort(()=>Math.random()-0.5).slice(0, Math.min(3, targets.length));
-  three.qte = {start:performance.now(), duration:1100, resolved:false, pivot:!!pivot};
+  let choices = targets.slice().sort(()=>Math.random()-0.5).slice(0, Math.min(3, targets.length));
+  // garante que a opção certa (definida na jogada 2D) sempre aparece entre as escolhas
+  if(correctTargetId!=null && !choices.find(c=>c.id===correctTargetId)){
+    const correctEnt = targets.find(t=>t.id===correctTargetId);
+    if(correctEnt){
+      choices[choices.length-1] = correctEnt;
+    }
+  }
+  three.qte = {start:performance.now(), duration:1300, resolved:false, pivot:!!pivot, correctTargetId: correctTargetId!=null?correctTargetId:null};
   const choicesEl = document.getElementById('qteChoices');
   choicesEl.innerHTML = '';
-  shuffled.forEach(t=>{
+  choices.forEach(t=>{
     const btn = document.createElement('button');
     btn.style.cssText = 'width:92px;height:92px;border-radius:16px;background:#e0b84a;border:3px solid #fff;color:#111;font-size:15px;font-weight:800;box-shadow:0 0 20px rgba(224,184,74,0.55);cursor:pointer;';
     btn.textContent = `#${t.number}`;
-    btn.onclick = ()=> resolveQTE(true, t.id);
+    btn.onclick = ()=> {
+      const isCorrect = three.qte.correctTargetId==null || t.id===three.qte.correctTargetId;
+      resolveQTE(isCorrect, t.id);
+    };
     choicesEl.appendChild(btn);
   });
   document.getElementById('qteOverlay').style.display = 'flex';
-  document.getElementById('qteResult').textContent = pivot ? 'PRESSÃO! Escolha rápido pra quem passar' : 'Marcado! Escolha rápido';
+  document.getElementById('qteResult').textContent = pivot ? 'PRESSÃO! Pensa rápido: pra quem era o passe?' : 'Marcado! Escolha rápido';
   document.getElementById('qteResult').style.color = '#fff';
   document.getElementById('qteBar').style.width = '100%';
 }
@@ -2469,17 +2508,18 @@ function startQTE(pivot){
 function resolveQTE(success, chosenTargetId){
   if(!three.qte || three.qte.resolved) return;
   const wasPivot = !!three.qte.pivot;
+  const wasScripted = !three.controlMode; // veio do gatilho automático da jogada 2D, não do controle livre
   three.qte.resolved = true;
   document.getElementById('qteChoices').innerHTML = '';
   const resultEl = document.getElementById('qteResult');
   if(success){
-    resultEl.textContent = '✅ Tocou pra frente!';
+    resultEl.textContent = '✅ Era pra ele mesmo! Tocou pra frente';
     resultEl.style.color = '#4ade80';
     if(chosenTargetId!=null) doPass(chosenTargetId, false);
   } else {
-    resultEl.textContent = wasPivot ? '❌ Perdeu a bola no domínio!' : '❌ Perdeu a bola!';
+    resultEl.textContent = wasScripted ? '❌ Passe errado! Recomeçando o lance...' : (wasPivot ? '❌ Perdeu a bola no domínio!' : '❌ Perdeu a bola!');
     resultEl.style.color = '#ff6b6b';
-    if(three.manualPos){
+    if(!wasScripted && three.manualPos){
       const stolenDir = new THREE.Vector3((Math.random()-0.5), 0, (Math.random()-0.5));
       if(stolenDir.lengthSq()<0.001) stolenDir.set(1,0,0);
       stolenDir.normalize();
@@ -2491,11 +2531,21 @@ function resolveQTE(success, chosenTargetId){
     if(el) el.style.display = 'none';
     three.qte = null;
     three.qteCooldownUntil = performance.now() + 1500;
-    if(!three.controlMode){
-      three.playing = true; // volta a rodar a jogada sozinha de onde parou
-      document.getElementById('play3DBtn').textContent = '⏸ Pausar';
+    if(wasScripted){
+      if(success){
+        three.playing = true; // acertou: continua a jogada de onde parou
+        document.getElementById('play3DBtn').textContent = '⏸ Pausar';
+      } else {
+        // errou o passe: o lance recomeça do início
+        three.t = 0;
+        three.transition = null;
+        three.triggeredPivotSteps = new Set();
+        three.playing = true;
+        document.getElementById('play3DBtn').textContent = '⏸ Pausar';
+        document.getElementById('scrub3D').value = 0;
+      }
     }
-  }, success ? 900 : 700);
+  }, success ? 900 : 1100);
 }
 
 document.getElementById('povSelect').addEventListener('change', (e)=>{
