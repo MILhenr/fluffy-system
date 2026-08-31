@@ -88,6 +88,7 @@
       <input type="range" id="stepSlider" min="0" max="0" step="1" value="0">
       <button id="highPassBtn" class="txt" style="display:none;">🏹 Passe alto</button>
       <button id="soloModeBtn" class="txt" style="display:none;">🔓 Mover sozinho</button>
+      <button id="pivotPassStepBtn" class="txt" style="display:none;">🎯 Passe pivô</button>
       <button id="clearSteps" class="iconbtn warn" style="width:44px;height:44px;flex-shrink:0;" title="Limpar etapas"><span class="ic" style="font-size:16px;">🧹</span></button>
       <button id="clearAll" class="iconbtn warn" style="width:44px;height:44px;flex-shrink:0;" title="Nova prancha"><span class="ic" style="font-size:16px;">🗂️</span></button>
     </div>
@@ -489,7 +490,43 @@ function updateHighPassBtnVisibility(){
   } else {
     btn.style.display = 'none';
   }
+  updatePivotPassStepBtnVisibility();
 }
+function updatePivotPassStepBtnVisibility(){
+  const btn = document.getElementById('pivotPassStepBtn');
+  if(!btn) return;
+  const ball = entities.find(e=>e.team==='ball');
+  if(ball && selectedId===ball.id && currentStep>0 && steps[currentStep].positions[ball.id]){
+    btn.style.display = '';
+    const pos = steps[currentStep].positions[ball.id];
+    btn.classList.toggle('primary', !!pos.pivotPass);
+  } else {
+    btn.style.display = 'none';
+  }
+}
+document.getElementById('pivotPassStepBtn').addEventListener('click', ()=>{
+  const ball = entities.find(e=>e.team==='ball');
+  if(!ball || currentStep===0) return;
+  const pos = steps[currentStep].positions[ball.id];
+  if(!pos) return;
+  pos.pivotPass = !pos.pivotPass;
+  if(pos.pivotPass){
+    // acha automaticamente quem está mais perto da bola nesta etapa — é
+    // quem vai ter o minigame toda vez que a jogada passar por aqui
+    let nearestId = null, nearestDist = Infinity;
+    entities.forEach(e=>{
+      if(e.team==='ball') return;
+      const p = steps[currentStep].positions[e.id];
+      if(!p) return;
+      const d = Math.hypot(p.x-pos.x, p.y-pos.y);
+      if(d<nearestDist){ nearestDist=d; nearestId=e.id; }
+    });
+    pos.pivotTargetId = nearestId;
+  } else {
+    pos.pivotTargetId = null;
+  }
+  updatePivotPassStepBtnVisibility();
+});
 function updateSoloModeBtnVisibility(){
   const btn = document.getElementById('soloModeBtn');
   if(!btn) return;
@@ -1868,6 +1905,7 @@ function initThree(){
     shakeSeed:Math.random()*1000, povId:null, lastFrame:performance.now(),
     freeLookYaw:0, freeLookPitch:0, isRecording:false,
     controlMode:false, manualPos:null, manualYaw:0, manualBallPos:null, passAnim:null, frozenPositions:{},
+    triggeredPivotSteps:new Set(),
     envImages:{},
     backdrops:{ goal1:goal1Backdrop, goal2:goal2Backdrop, stand1:stand1Backdrop, stand2:stand2Backdrop, roof:roofBackdrop, banner1:banner1Backdrop, banner2:banner2Backdrop },
     sideExtras:{ bleachers1, bleachers2, bench1, bench2 },
@@ -1940,7 +1978,9 @@ function animate3D(){
     const durs = allDurations();
     const dur = totalDuration(durs);
     if(three.playing){
+      const prevT = three.t;
       three.t += dt*three.speed;
+      checkScriptedPivotTriggers(prevT, three.t, durs);
       if(three.t>dur){
         if(three.isRecording){
           three.t = dur;
@@ -1949,6 +1989,7 @@ function animate3D(){
           // repete sozinho em loop, sem precisar voltar e clicar de novo
           three.t = 0;
           three.transition = null;
+          three.triggeredPivotSteps = new Set(); // no próximo loop, os gatilhos disparam de novo
         }
       }
       document.getElementById('scrub3D').value = Math.round(three.t/dur*1000);
@@ -1963,6 +2004,51 @@ function animate3D(){
 }
 
 let moveInput = {fwd:false, back:false, left:false, right:false};
+
+function checkScriptedPivotTriggers(prevT, newT, durs){
+  if(!three || (three.qte && !three.qte.resolved)) return;
+  if(!three.triggeredPivotSteps) three.triggeredPivotSteps = new Set();
+  const ballEnt = entities.find(e=>e.team==='ball');
+  if(!ballEnt) return;
+  let acc = 0;
+  for(let i=0;i<steps.length-1;i++){
+    const arrivalTime = acc + durs[i];
+    const destPos = steps[i+1].positions[ballEnt.id];
+    if(destPos && destPos.pivotPass && !three.triggeredPivotSteps.has(i+1) && prevT<arrivalTime && newT>=arrivalTime){
+      three.triggeredPivotSteps.add(i+1);
+      triggerScriptedPivotQTE(i+1);
+      return;
+    }
+    acc += durs[i];
+  }
+}
+
+function triggerScriptedPivotQTE(stepIdx){
+  const ballEnt = entities.find(e=>e.team==='ball');
+  const ballPos = ballEnt && steps[stepIdx].positions[ballEnt.id];
+  if(!ballEnt || !ballPos) return;
+  let targetId = ballPos.pivotTargetId;
+  if(targetId==null){
+    let nearestId=null, nearestDist=Infinity;
+    entities.forEach(e=>{
+      if(e.team==='ball') return;
+      const p = steps[stepIdx].positions[e.id];
+      if(!p) return;
+      const d = Math.hypot(p.x-ballPos.x, p.y-ballPos.y);
+      if(d<nearestDist){ nearestDist=d; nearestId=e.id; }
+    });
+    targetId = nearestId;
+  }
+  if(targetId==null || !three) return;
+  three.playing = false;
+  three.povId = targetId;
+  const sel = document.getElementById('povSelect');
+  if(sel) sel.value = targetId;
+  selectedId = targetId;
+  three.freeLookYaw = 0; three.freeLookPitch = 0;
+  startCameraTransition();
+  startQTE(true);
+}
 
 function switchControlTo(newPovId){
   if(!three || newPovId===three.povId || !three.manualPos) return;
@@ -2261,6 +2347,7 @@ document.getElementById('goto3D').onclick = ()=>{
   document.getElementById('controlModeBtn').textContent = '🎮 Controlar';
   document.getElementById('viewer3DModeBadge').textContent = 'PRIMEIRA PESSOA';
   three.t = 0; three.playing = true;
+  three.triggeredPivotSteps = new Set();
   document.getElementById('play3DBtn').textContent = '⏸ Pausar';
   requestAnimationFrame(animate3D);
 };
@@ -2404,6 +2491,10 @@ function resolveQTE(success, chosenTargetId){
     if(el) el.style.display = 'none';
     three.qte = null;
     three.qteCooldownUntil = performance.now() + 1500;
+    if(!three.controlMode){
+      three.playing = true; // volta a rodar a jogada sozinha de onde parou
+      document.getElementById('play3DBtn').textContent = '⏸ Pausar';
+    }
   }, success ? 900 : 700);
 }
 
@@ -2422,6 +2513,7 @@ document.getElementById('replay3DBtn').onclick = ()=>{
   three.t = 0;
   three.transition = null;
   three.playing = true;
+  three.triggeredPivotSteps = new Set();
   document.getElementById('play3DBtn').textContent = '⏸ Pausar';
   document.getElementById('scrub3D').value = 0;
 };
