@@ -87,6 +87,7 @@
       <span id="stepLabel">Etapa 1/1</span>
       <input type="range" id="stepSlider" min="0" max="0" step="1" value="0">
       <button id="highPassBtn" class="txt" style="display:none;">🏹 Passe alto</button>
+      <button id="soloModeBtn" class="txt" style="display:none;">🔓 Mover sozinho</button>
       <button id="clearSteps" class="iconbtn warn" style="width:44px;height:44px;flex-shrink:0;" title="Limpar etapas"><span class="ic" style="font-size:16px;">🧹</span></button>
       <button id="clearAll" class="iconbtn warn" style="width:44px;height:44px;flex-shrink:0;" title="Nova prancha"><span class="ic" style="font-size:16px;">🗂️</span></button>
     </div>
@@ -475,6 +476,7 @@ function draw(){
     drawEntityAt(e, pos, false);
   });
   updateHighPassBtnVisibility();
+  updateSoloModeBtnVisibility();
 }
 function updateHighPassBtnVisibility(){
   const btn = document.getElementById('highPassBtn');
@@ -488,6 +490,22 @@ function updateHighPassBtnVisibility(){
     btn.style.display = 'none';
   }
 }
+function updateSoloModeBtnVisibility(){
+  const btn = document.getElementById('soloModeBtn');
+  if(!btn) return;
+  const sel = entities.find(e=>e.id===selectedId);
+  if(sel && sel.team!=='ball' && findPairEntity(sel)){
+    btn.style.display = '';
+    btn.classList.toggle('primary', soloModeId===selectedId);
+  } else {
+    btn.style.display = 'none';
+  }
+}
+document.getElementById('soloModeBtn').addEventListener('click', ()=>{
+  if(selectedId==null) return;
+  soloModeId = soloModeId===selectedId ? null : selectedId;
+  updateSoloModeBtnVisibility();
+});
 
 // ---------------------------------------------------------------------------
 // INTERAÇÃO: arrastar reposiciona na etapa atual; alça branca define o olhar
@@ -560,6 +578,7 @@ function findPairEntity(entity){
   }
   return null;
 }
+let soloModeId = null; // jogador que se move sozinho (sem o par acompanhar) nesta etapa
 canvas.addEventListener('pointermove', (ev)=>{
   if(playing2D) return;
   const p = pointerPos(ev);
@@ -579,12 +598,15 @@ canvas.addEventListener('pointermove', (ev)=>{
   pos.x = f.x; pos.y = f.y;
 
   // move o par (marcação) junto, mantendo a distância relativa que já existia
-  const pairEntity = findPairEntity(dragging);
-  if(pairEntity){
-    const pairPos = steps[currentStep].positions[pairEntity.id];
-    if(pairPos){
-      pairPos.x = Math.min(1.03, Math.max(-0.03, pairPos.x+dx));
-      pairPos.y = Math.min(1.03, Math.max(-0.03, pairPos.y+dy));
+  // — a não ser que esse jogador esteja em "mover sozinho" nesta etapa
+  if(soloModeId!==dragging.id){
+    const pairEntity = findPairEntity(dragging);
+    if(pairEntity){
+      const pairPos = steps[currentStep].positions[pairEntity.id];
+      if(pairPos){
+        pairPos.x = Math.min(1.03, Math.max(-0.03, pairPos.x+dx));
+        pairPos.y = Math.min(1.03, Math.max(-0.03, pairPos.y+dy));
+      }
     }
   }
 
@@ -731,6 +753,7 @@ document.getElementById('stepAdd').onclick = ()=>{
   });
   steps.splice(currentStep+1, 0, {positions:copy});
   currentStep++;
+  soloModeId = null; // na nova etapa, volta a acompanhar automaticamente
   recomputeAutoFacing(currentStep);
   updateStepUI(); draw();
 };
@@ -1941,6 +1964,23 @@ function animate3D(){
 
 let moveInput = {fwd:false, back:false, left:false, right:false};
 
+function switchControlTo(newPovId){
+  if(!three || newPovId===three.povId || !three.manualPos) return;
+  // o jogador que eu estava controlando vira "congelado" na posição atual
+  three.frozenPositions[three.povId] = three.manualPos.clone();
+  const newFp = three.frozenPositions[newPovId];
+  three.povId = newPovId;
+  if(newFp){
+    three.manualPos = newFp.clone();
+    delete three.frozenPositions[newPovId];
+  }
+  const sel = document.getElementById('povSelect');
+  if(sel) sel.value = newPovId;
+  selectedId = newPovId;
+  three.freeLookYaw = 0; three.freeLookPitch = 0;
+  startCameraTransition();
+}
+
 function renderControlFrame(dt){
   const povEntity = three.snap.entities.find(e=>e.id===three.povId);
   if(!povEntity || !three.manualPos) return;
@@ -2077,6 +2117,18 @@ function renderControlFrame(dt){
         const wasPivotPass = three.passAnim.isPivotPass;
         three.passAnim = null;
         if(wasPivotPass && (!three.qte || three.qte.resolved)){
+          const povEntityNow = three.snap.entities.find(e=>e.id===three.povId);
+          if(povEntityNow){
+            let nearestId = null, nearestDist = Infinity;
+            entities.forEach(e=>{
+              if(e.team!==povEntityNow.team || e.id===three.povId || e.team==='ball') return;
+              const fp = three.frozenPositions[e.id];
+              if(!fp) return;
+              const d = fp.distanceTo(three.manualBallPos);
+              if(d<nearestDist){ nearestDist=d; nearestId=e.id; }
+            });
+            if(nearestId!=null) switchControlTo(nearestId);
+          }
           startQTE(true);
         }
       }
