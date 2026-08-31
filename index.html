@@ -184,7 +184,10 @@
           <button id="moveBackBtn" class="ctrlBtn">⬇</button>
           <div></div>
         </div>
-        <button id="passBtn" style="pointer-events:auto;width:88px;height:88px;border-radius:50%;background:#2c7a3f;border:2px solid #4aa862;color:#fff;font-size:14px;font-weight:700;">⚡<br>Passe</button>
+        <div style="display:flex;flex-direction:column;gap:8px;pointer-events:auto;">
+          <button id="passBtn" style="width:88px;height:88px;border-radius:50%;background:#2c7a3f;border:2px solid #4aa862;color:#fff;font-size:13px;font-weight:700;">⚡<br>Passe</button>
+          <button id="pivotPassBtn" style="width:88px;height:56px;border-radius:16px;background:#7a3a2c;border:2px solid #b05a3f;color:#fff;font-size:11px;font-weight:700;line-height:1.2;">🎯 Passe<br>Pivô</button>
+        </div>
       </div>
       <div id="qteOverlay" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;flex-direction:column;gap:16px;background:rgba(0,0,0,0.4);z-index:40;">
         <div id="qteResult" style="font-size:22px;font-weight:800;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,0.7);min-height:28px;"></div>
@@ -855,13 +858,13 @@ document.getElementById('randomPlayBtn').onclick = ()=>{
       next[e.id] = {x:clamp01(p.x+lateral), y:clamp01(p.y-adv), facingAngle:p.facingAngle, customFacing:false};
     });
 
-    // defesa: quem tem marcação fixa (número definido) persegue esse jogador
-    // específico; entre os sem marcação, o mais próximo do portador fecha, e
-    // os outros recompõem cobrindo espaço
+    // defesa: por padrão, cada vermelho já marca o azul de mesmo número (tipo
+    // "vermelho 1 sempre vai atrás do azul 1") — dá pra sobrescrever tocando
+    // duas vezes no jogador e definindo outro número em "Marca o nº"
     const explicitMarks = {};
     reds.forEach(e=>{
-      if(!e.markNumber) return;
-      const target = blues.find(b=>String(b.number)===String(e.markNumber));
+      const wanted = e.markNumber || e.number;
+      const target = blues.find(b=>String(b.number)===String(wanted));
       if(target) explicitMarks[e.id] = target;
     });
     const freeReds = reds.filter(e=>!explicitMarks[e.id]);
@@ -1106,8 +1109,8 @@ document.getElementById('patternPlayBtn').onclick = async ()=>{
 
     const explicitMarks = {};
     reds.forEach(e=>{
-      if(!e.markNumber) return;
-      const t = blues.find(b=>String(b.number)===String(e.markNumber));
+      const wanted = e.markNumber || e.number;
+      const t = blues.find(b=>String(b.number)===String(wanted));
       if(t) explicitMarks[e.id] = t;
     });
     const freeReds = reds.filter(e=>!explicitMarks[e.id]);
@@ -1964,6 +1967,7 @@ function renderControlFrame(dt){
 
   const dir = new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));
   let pitch = -0.03 - Math.min(speed,8)*0.03 + (three.freeLookPitch||0);
+  if(qteActive) pitch -= 0.22; // cabeça mais pro chão durante a disputa — não extremo, mas visível
   pitch = Math.max(-1.3, Math.min(1.3, pitch));
   const target = basePos.clone().add(dir.multiplyScalar(5));
   target.y = basePos.y + Math.tan(pitch)*5;
@@ -1990,7 +1994,14 @@ function renderControlFrame(dt){
       if(ballMesh) ballMesh.position.copy(pos);
       if(u>=1){
         three.manualBallPos = three.passAnim.to.clone();
+        const wasPivotPass = three.passAnim.isPivotPass;
         three.passAnim = null;
+        if(wasPivotPass && (!three.qte || three.qte.resolved)){
+          three.qte = {defenderId:null, start:performance.now(), duration:900, resolved:false, pivot:true};
+          document.getElementById('qteOverlay').style.display = 'flex';
+          document.getElementById('qteResult').textContent = '';
+          document.getElementById('qteBar').style.width = '100%';
+        }
       }
     } else if(ballMesh && three.manualBallPos){
       ballMesh.position.copy(three.manualBallPos);
@@ -2187,14 +2198,29 @@ document.getElementById('passBtn').addEventListener('click', ()=>{
   const from = (three.manualBallPos || three.manualPos).clone();
   const to = three.manualPos.clone().add(dir.multiplyScalar(12));
   const dist = from.distanceTo(to);
-  three.passAnim = {from, to, start: performance.now(), duration: Math.max(200, (dist/BALL_SPEED)*1000)};
+  three.passAnim = {from, to, start: performance.now(), duration: Math.max(200, (dist/BALL_SPEED)*1000), isPivotPass:false};
+});
+document.getElementById('pivotPassBtn').addEventListener('click', ()=>{
+  if(!three.controlMode || !three.manualPos) return;
+  const yaw = three.manualYaw + (three.freeLookYaw||0);
+  const dir = new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));
+  const from = (three.manualBallPos || three.manualPos).clone();
+  const to = three.manualPos.clone().add(dir.multiplyScalar(12));
+  const dist = from.distanceTo(to);
+  // passe pro pivô: na chegada, sempre dispara o minigame de domínio sob pressão
+  three.passAnim = {from, to, start: performance.now(), duration: Math.max(200, (dist/BALL_SPEED)*1000), isPivotPass:true};
 });
 
 function resolveQTE(success){
   if(!three.qte || three.qte.resolved) return;
+  const wasPivot = !!three.qte.pivot;
   three.qte.resolved = true;
   const resultEl = document.getElementById('qteResult');
-  resultEl.textContent = success ? '✅ Passou!' : '❌ Perdeu a bola!';
+  if(success){
+    resultEl.textContent = wasPivot ? '✅ Dominou! Escolha o que fazer' : '✅ Passou!';
+  } else {
+    resultEl.textContent = wasPivot ? '❌ Perdeu a bola no domínio!' : '❌ Perdeu a bola!';
+  }
   resultEl.style.color = success ? '#4ade80' : '#ff6b6b';
   if(!success && three.manualPos){
     const stolenDir = new THREE.Vector3((Math.random()-0.5), 0, (Math.random()-0.5));
@@ -2207,7 +2233,7 @@ function resolveQTE(success){
     if(el) el.style.display = 'none';
     three.qte = null;
     three.qteCooldownUntil = performance.now() + 1500;
-  }, 700);
+  }, success && wasPivot ? 1000 : 700);
 }
 document.getElementById('qteBtn').addEventListener('click', ()=>{
   if(three && three.qte && !three.qte.resolved) resolveQTE(true);
