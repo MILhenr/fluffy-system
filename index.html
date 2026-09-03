@@ -55,6 +55,9 @@
 
   #viewer3D{display:none;flex-direction:column;height:100%;width:100%;}
   #v3dCanvasWrap{flex:1;position:relative;}
+  #viewer3D.focusMode #bgToolbar, #viewer3D.focusMode #sideToolbar, #viewer3D.focusMode #speedToolbar{display:none!important;}
+  #viewer3D.focusMode #toolbar{padding:6px 10px;}
+  #viewer3D.focusMode #toolbar span{display:none;}
   .hud{position:absolute;left:0;right:0;top:0;padding:12px 16px;display:flex;justify-content:space-between;align-items:flex-start;pointer-events:none;}
   .badge{background:rgba(20,20,20,0.65);border:1px solid #444;border-radius:6px;padding:6px 12px;font-size:12px;letter-spacing:.03em;color:#aaa;}
 </style>
@@ -114,6 +117,8 @@
       <div class="sep"></div>
       <button id="controlModeBtn" class="txt primary">🎮 Controlar</button>
       <button id="speedToggleBtn" class="txt">⏱ Velocidade: 1x</button>
+      <button id="fullscreenBtn" class="txt">⛶ Tela cheia</button>
+      <button id="focusModeBtn" class="txt primary">🖥️ Só o 3D</button>
     </div>
     <div id="speedToolbar" style="display:none;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 14px;background:#101010;border-bottom:1px solid #262626;">
       <button class="txt" data-spd3d="0.25">0.25x</button>
@@ -2048,6 +2053,22 @@ function animate3D(){
 }
 
 let moveInput = {fwd:false, back:false, left:false, right:false};
+document.addEventListener('keydown', (ev)=>{
+  if(!three || !three.controlMode) return;
+  const k = ev.key.toLowerCase();
+  if(k==='w' || k==='arrowup') moveInput.fwd = true;
+  else if(k==='s' || k==='arrowdown') moveInput.back = true;
+  else if(k==='a' || k==='arrowleft') moveInput.left = true;
+  else if(k==='d' || k==='arrowright') moveInput.right = true;
+  else if(k===' '){ ev.preventDefault(); document.getElementById('passBtn').click(); }
+});
+document.addEventListener('keyup', (ev)=>{
+  const k = ev.key.toLowerCase();
+  if(k==='w' || k==='arrowup') moveInput.fwd = false;
+  else if(k==='s' || k==='arrowdown') moveInput.back = false;
+  else if(k==='a' || k==='arrowleft') moveInput.left = false;
+  else if(k==='d' || k==='arrowright') moveInput.right = false;
+});
 
 function checkScriptedPivotTriggers(prevT, newT, durs){
   if(!three || (three.qte && !three.qte.resolved)) return;
@@ -2401,6 +2422,8 @@ function render3DFrame(tt, dur, durs){
 document.getElementById('goto3D').onclick = ()=>{
   document.getElementById('editorScreen').style.display = 'none';
   document.getElementById('viewer3D').style.display = 'flex';
+  document.getElementById('viewer3D').classList.add('focusMode');
+  document.getElementById('focusModeBtn').textContent = '🖥️ Mostrar controles';
   if(!three) initThree();
   rebuild3DScene();
   if(selectedId!=null && entities.find(e=>e.id===selectedId && e.team!=='ball')){
@@ -2416,6 +2439,7 @@ document.getElementById('goto3D').onclick = ()=>{
   three.t = 0; three.playing = true;
   three.triggeredPivotSteps = new Set();
   document.getElementById('play3DBtn').textContent = '⏸ Pausar';
+  setTimeout(refreshThreeSize, 30);
   requestAnimationFrame(animate3D);
 };
 document.getElementById('backTo2D').onclick = ()=>{
@@ -2692,6 +2716,33 @@ document.getElementById('record3DBtn').onclick = ()=>{
   if(three.isRecording) stopRecordingManual();
   else startRecording();
 };
+
+document.getElementById('fullscreenBtn').addEventListener('click', ()=>{
+  const el = document.getElementById('viewer3D');
+  if(!document.fullscreenElement){
+    (el.requestFullscreen || el.webkitRequestFullscreen || function(){}).call(el);
+  } else {
+    (document.exitFullscreen || document.webkitExitFullscreen || function(){}).call(document);
+  }
+});
+function refreshThreeSize(){
+  if(!three) return;
+  three.camera.aspect = three.wrap.clientWidth/three.wrap.clientHeight;
+  three.camera.updateProjectionMatrix();
+  three.renderer.setSize(three.wrap.clientWidth, three.wrap.clientHeight);
+}
+document.addEventListener('fullscreenchange', ()=>{
+  document.getElementById('fullscreenBtn').textContent = document.fullscreenElement ? '⛶ Sair da tela cheia' : '⛶ Tela cheia';
+  setTimeout(refreshThreeSize, 60);
+});
+document.addEventListener('webkitfullscreenchange', ()=>{ setTimeout(refreshThreeSize, 60); });
+
+document.getElementById('focusModeBtn').addEventListener('click', ()=>{
+  const el = document.getElementById('viewer3D');
+  const on = el.classList.toggle('focusMode');
+  document.getElementById('focusModeBtn').textContent = on ? '🖥️ Mostrar controles' : '🖥️ Só o 3D';
+  setTimeout(refreshThreeSize, 30);
+});
 
 function applySegmentTexture(seg, sourceTex, imgAspect){
   const tex = sourceTex.clone();
