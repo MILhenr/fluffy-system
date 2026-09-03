@@ -234,6 +234,7 @@ const MIN_SPEED = 1.5, MAX_SPEED = 8.2, MIN_STEP_DURATION = 0.07;
 const BALL_SPEED = 10.8; // m/s constante — a bola sempre viaja nessa velocidade,
                          // nunca fica mais lenta só porque um jogador correu
                          // muito no mesmo intervalo.
+const BALL_RADIUS = 0.24; // maior e mais fácil de ver
 
 let entities = [];               // {id, team:'blue'|'red'|'ball', number, name}
 let steps = [ {positions:{}} ];  // {positions:{ [id]: {x,y,facingAngle} }}
@@ -1434,7 +1435,7 @@ function sample3D(id, t, durs, isBall){
   const p = sampleEntityAt(id, t, durs, isBall);
   if(!p) return null;
   const pos = toWorld(p.x,p.y);
-  if(p.height) pos.y = p.height;
+  if(isBall) pos.y = (p.height||0) + BALL_RADIUS;
   return { pos, facingAngle: p.facingAngle ?? -Math.PI/2 };
 }
 function velocity3D(id, t, dt=0.05, durs, isBall){
@@ -1498,21 +1499,58 @@ function makeWoodFloorTexture(){
 
 function makeSoccerBallTexture(){
   const c = document.createElement('canvas');
-  c.width = 256; c.height = 128;
+  c.width = 512; c.height = 256;
   const ctx2 = c.getContext('2d');
-  ctx2.fillStyle = '#f4f4f4'; ctx2.fillRect(0,0,256,128);
-  ctx2.fillStyle = '#1a1a1a';
-  const pent = (cx,cy,r)=>{
+  ctx2.fillStyle = '#f7f7f5'; ctx2.fillRect(0,0,512,256);
+  const teal = '#1fae8e';
+  const black = '#141414';
+
+  function hexPanel(cx,cy,r,rot){
+    ctx2.save();
+    ctx2.translate(cx,cy); ctx2.rotate(rot);
     ctx2.beginPath();
-    for(let i=0;i<5;i++){
-      const a = -Math.PI/2 + i*(Math.PI*2/5);
-      const x = cx+Math.cos(a)*r, y = cy+Math.sin(a)*r;
+    for(let i=0;i<6;i++){
+      const a = i*(Math.PI*2/6);
+      const x = Math.cos(a)*r, y = Math.sin(a)*r*0.62;
       i===0?ctx2.moveTo(x,y):ctx2.lineTo(x,y);
     }
-    ctx2.closePath(); ctx2.fill();
-  };
-  [[32,20],[96,16],[160,24],[224,18],[16,64],[80,60],[144,66],[208,60],[48,108],[112,112],[176,106],[240,110]]
-    .forEach(([x,y])=>pent(x,y,13));
+    ctx2.closePath();
+    ctx2.fillStyle = black; ctx2.fill();
+    // trim verde-água na borda do painel
+    ctx2.lineWidth = r*0.09;
+    ctx2.strokeStyle = teal;
+    ctx2.stroke();
+    // espiral/detalhe sutil dentro do painel (lembra o padrão da bola real)
+    ctx2.strokeStyle = 'rgba(31,174,142,0.55)';
+    ctx2.lineWidth = r*0.035;
+    for(let k=1;k<=3;k++){
+      ctx2.beginPath();
+      ctx2.arc(0,0,r*0.16*k,0,Math.PI*2);
+      ctx2.stroke();
+    }
+    ctx2.restore();
+  }
+  function boltPanel(cx,cy,r,rot){
+    // painel branco com um raio/zigue-zague preto+verde, como na foto de referência
+    ctx2.save();
+    ctx2.translate(cx,cy); ctx2.rotate(rot);
+    ctx2.strokeStyle = black; ctx2.lineWidth = r*0.16; ctx2.lineCap='round';
+    ctx2.beginPath();
+    ctx2.moveTo(-r*0.5,-r*0.55); ctx2.lineTo(r*0.1,-r*0.1); ctx2.lineTo(-r*0.15,r*0.15); ctx2.lineTo(r*0.5,r*0.55);
+    ctx2.stroke();
+    ctx2.strokeStyle = teal; ctx2.lineWidth = r*0.055;
+    ctx2.beginPath();
+    ctx2.moveTo(-r*0.5,-r*0.3); ctx2.lineTo(r*0.15,r*0.05); ctx2.lineTo(-r*0.05,r*0.3); ctx2.lineTo(r*0.5,r*0.5);
+    ctx2.stroke();
+    ctx2.restore();
+  }
+
+  const hexSpots = [[80,42,'a'],[240,34,'b'],[400,46,'a'],[64,128,'b'],[224,120,'a'],[384,128,'b'],[128,214,'a'],[288,206,'b'],[448,214,'a']];
+  hexSpots.forEach(([x,y,type],i)=>{
+    if(type==='a') hexPanel(x,y,34,i*0.6);
+    else boltPanel(x,y,30,i*0.5);
+  });
+
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
   tex.encoding = THREE.sRGBEncoding;
@@ -1928,7 +1966,7 @@ function rebuild3DScene(){
   three.snap.entities.forEach(e=>{
     if(e.team==='ball'){
       const ballTex = makeSoccerBallTexture();
-      const ballMesh = new THREE.Mesh(new THREE.SphereGeometry(0.14,20,20), new THREE.MeshStandardMaterial({map:ballTex, roughness:0.6}));
+      const ballMesh = new THREE.Mesh(new THREE.SphereGeometry(BALL_RADIUS,24,24), new THREE.MeshStandardMaterial({map:ballTex, roughness:0.45}));
       ballMesh.castShadow = true;
       three.scene.add(ballMesh);
       three.meshes[e.id] = ballMesh;
