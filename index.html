@@ -77,6 +77,10 @@
       <button id="saveBtn" class="iconbtn primary"><span class="ic">💾</span>Salvar</button>
       <button id="saveMovementBtn" class="iconbtn primary"><span class="ic">🏃</span>Salvar jogada</button>
       <button id="loadMovementBtn" class="iconbtn"><span class="ic">📂</span>Jogadas</button>
+      <button id="importBtn" class="iconbtn"><span class="ic">📥</span>Importar</button>
+      <input type="file" id="importInput" accept="application/json" style="display:none">
+      <button id="importVideoBtn" class="iconbtn primary"><span class="ic">🎥</span>Importar de vídeo</button>
+      <input type="file" id="importVideoInput" accept="video/*" style="display:none">
       <div class="sep"></div>
       <button id="randomPlayBtn" class="iconbtn warn"><span class="ic">⚔️</span>ALEATÓRIO JOGADA</button>
       <button id="remixBtn" class="iconbtn warn"><span class="ic">🧩</span>Remontar jogadas</button>
@@ -872,6 +876,196 @@ async function loadBoard(){
   }catch(e){}
 }
 document.getElementById('saveBtn').onclick = saveBoard;
+
+document.getElementById('importBtn').onclick = ()=> document.getElementById('importInput').click();
+function applyImportedPlay(data){
+  entities = data.entities || [];
+  steps = (data.steps && data.steps.length) ? data.steps : [{positions:{}}];
+  currentStep = 0;
+  nextBlueNum = data.nextBlueNum || 1; nextRedNum = data.nextRedNum || 1;
+  idCounter = Math.max(1, ...entities.map(e=>e.id+1), 1);
+  document.getElementById('addBall').disabled = !!entities.find(e=>e.team==='ball');
+  recomputeAllStepsAutoFacing();
+  updateStepUI(); draw(); refreshPovSelect();
+}
+
+document.getElementById('importInput').addEventListener('change', (ev)=>{
+  const file = ev.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    try{
+      const data = JSON.parse(e.target.result);
+      applyImportedPlay(data);
+      const status = document.getElementById('status');
+      status.textContent = '✓ jogada importada';
+      setTimeout(()=>status.textContent='', 2500);
+    }catch(err){
+      alert('Não consegui ler esse arquivo. Confere se é um JSON de jogada válido.');
+      console.error(err);
+    }
+  };
+  reader.readAsText(file);
+  ev.target.value = '';
+});
+
+// ---------------------------------------------------------------------------
+// IMPORTAR DE VÍDEO: manda o vídeo pro backend de rastreamento (serviço
+// separado, veja LEIA-ME.md), marca os 4 cantos da quadra, espera processar
+// e carrega a jogada reconstruída automaticamente.
+// ---------------------------------------------------------------------------
+const BACKEND_URL_KEY = 'video_backend_url';
+async function getBackendUrl(promptIfMissing){
+  try{
+    const r = await storageGet(BACKEND_URL_KEY);
+    if(r && r.value) return r.value;
+  }catch(e){}
+  if(!promptIfMissing) return null;
+  return new Promise((resolve)=>{
+    const overlay = openModal(`
+      <h3>Endereço do backend de vídeo</h3>
+      <p style="font-size:12.5px;color:#999;margin-top:-6px;">Cola aqui a URL do serviço que você publicou no Railway (veja o LEIA-ME.md). Só precisa fazer isso uma vez.</p>
+      <input type="text" id="backendUrlInput" placeholder="https://seu-projeto-production.up.railway.app">
+      <div class="modalBtnRow">
+        <button class="secondary" id="backendUrlCancel">Cancelar</button>
+        <button id="backendUrlOk">Salvar</button>
+      </div>`);
+    document.getElementById('backendUrlCancel').onclick = ()=>{ overlay.remove(); resolve(null); };
+    document.getElementById('backendUrlOk').onclick = async ()=>{
+      let url = document.getElementById('backendUrlInput').value.trim().replace(/\/$/,'');
+      if(!url){ resolve(null); overlay.remove(); return; }
+      await storageSet(BACKEND_URL_KEY, url);
+      overlay.remove();
+      resolve(url);
+    };
+  });
+}
+
+document.getElementById('importVideoBtn').onclick = async ()=>{
+  const backendUrl = await getBackendUrl(true);
+  if(!backendUrl) return;
+  document.getElementById('importVideoInput').dataset.backendUrl = backendUrl;
+  document.getElementById('importVideoInput').click();
+};
+
+document.getElementById('importVideoInput').addEventListener('change', async (ev)=>{
+  const file = ev.target.files[0];
+  ev.target.value = '';
+  if(!file) return;
+  const backendUrl = ev.target.dataset.backendUrl;
+
+  const overlay = openModal(`
+    <h3>Importar de vídeo</h3>
+    <div id="videoImportArea" style="color:#999;font-size:13px;">Enviando vídeo pro servidor...</div>
+    <div class="modalBtnRow"><button class="secondary" id="videoImportCancel">Cancelar</button></div>`);
+  document.getElementById('videoImportCancel').onclick = ()=> overlay.remove();
+  const area = document.getElementById('videoImportArea');
+
+  try{
+    const fd = new FormData();
+    fd.append('file', file);
+    const upRes = await fetch(backendUrl + '/upload', {method:'POST', body:fd});
+    if(!upRes.ok){
+      const errText = await upRes.text().catch(()=>upRes.statusText);
+      area.innerHTML = `<span style="color:#ff6b6b;">Erro ao enviar: ${errText}</span>`;
+      return;
+    }
+    const upData = await upRes.json();
+
+    // ---- marcar os 4 cantos da quadra no primeiro frame ----
+    area.innerHTML = `
+      <div id="cornerStepLabel" style="margin-bottom:8px;">Toque no <b>1º canto</b>: perto de um gol, lado esquerdo</div>
+      <div style="position:relative;display:inline-block;max-width:100%;">
+        <img id="cornerImg" src="data:image/jpeg;base64,${upData.first_frame_b64}" style="max-width:100%;display:block;border-radius:8px;">
+        <canvas id="cornerCanvas" style="position:absolute;left:0;top:0;width:100%;height:100%;"></canvas>
+      </div>`;
+    const img = document.getElementById('cornerImg');
+    const cnv = document.getElementById('cornerCanvas');
+    const labelEl = document.getElementById('cornerStepLabel');
+    const cornerLabels = [
+      'Toque no <b>1º canto</b>: perto de um gol, lado esquerdo',
+      'Agora o <b>2º canto</b>: perto do MESMO gol, lado direito',
+      'Agora o <b>3º canto</b>: perto do OUTRO gol, lado direito',
+      'Por fim, o <b>4º canto</b>: perto do OUTRO gol, lado esquerdo'
+    ];
+    const corners = [];
+    function syncCanvasSize(){
+      cnv.width = img.clientWidth; cnv.height = img.clientHeight;
+    }
+    function redrawCorners(){
+      const ctx2 = cnv.getContext('2d');
+      ctx2.clearRect(0,0,cnv.width,cnv.height);
+      ctx2.strokeStyle = '#e0b84a'; ctx2.lineWidth = 3;
+      corners.forEach((p,i)=>{
+        ctx2.beginPath(); ctx2.arc(p.dx,p.dy,9,0,Math.PI*2); ctx2.fillStyle='#e0b84a'; ctx2.fill();
+        ctx2.fillStyle='#111'; ctx2.font='bold 13px sans-serif'; ctx2.textAlign='center'; ctx2.textBaseline='middle';
+        ctx2.fillText(String(i+1), p.dx, p.dy);
+      });
+      if(corners.length>1){
+        ctx2.beginPath();
+        corners.forEach((p,i)=> i===0?ctx2.moveTo(p.dx,p.dy):ctx2.lineTo(p.dx,p.dy));
+        if(corners.length===4) ctx2.closePath();
+        ctx2.stroke();
+      }
+    }
+    img.onload = syncCanvasSize;
+    if(img.complete) syncCanvasSize();
+    cnv.addEventListener('click', (e)=>{
+      if(corners.length>=4) return;
+      const rect = cnv.getBoundingClientRect();
+      const dx = e.clientX-rect.left, dy = e.clientY-rect.top;
+      const scaleX = img.naturalWidth/rect.width, scaleY = img.naturalHeight/rect.height;
+      corners.push({dx, dy, x: dx*scaleX, y: dy*scaleY});
+      redrawCorners();
+      if(corners.length<4){
+        labelEl.innerHTML = cornerLabels[corners.length];
+      } else {
+        labelEl.innerHTML = 'Prontinho! <button id="cornerConfirmBtn" style="margin-left:8px;background:#2c4270;border:1px solid #3d5a95;color:#fff;padding:8px 14px;border-radius:8px;">Confirmar e processar</button> <button id="cornerRedoBtn" style="margin-left:6px;background:#2a2a2a;border:1px solid #444;color:#eee;padding:8px 14px;border-radius:8px;">Refazer</button>';
+        document.getElementById('cornerConfirmBtn').onclick = ()=> submitCorners();
+        document.getElementById('cornerRedoBtn').onclick = ()=>{ corners.length=0; redrawCorners(); labelEl.innerHTML = cornerLabels[0]; };
+      }
+    });
+
+    async function submitCorners(){
+      area.innerHTML = '<div id="processingMsg">Processando... isso pode levar de meio minuto a alguns minutos (sem placa de vídeo, roda mais devagar mesmo).</div><div style="width:100%;height:10px;background:#333;border-radius:6px;overflow:hidden;margin-top:8px;"><div id="processBar" style="height:100%;width:0%;background:#e0b84a;"></div></div>';
+      const fd2 = new FormData();
+      fd2.append('corners', JSON.stringify(corners.map(c=>({x:c.x,y:c.y}))));
+      const procRes = await fetch(backendUrl + '/process/' + upData.job_id, {method:'POST', body:fd2});
+      if(!procRes.ok){
+        area.innerHTML = '<span style="color:#ff6b6b;">Erro ao iniciar o processamento.</span>';
+        return;
+      }
+      pollStatus();
+    }
+
+    async function pollStatus(){
+      try{
+        const r = await fetch(backendUrl + '/status/' + upData.job_id);
+        const s = await r.json();
+        const bar = document.getElementById('processBar');
+        if(bar) bar.style.width = (s.progress||0) + '%';
+        if(s.status === 'done'){
+          applyImportedPlay(s.result);
+          overlay.remove();
+          const status = document.getElementById('status');
+          status.textContent = '✓ jogada importada do vídeo';
+          setTimeout(()=>status.textContent='', 3000);
+          return;
+        }
+        if(s.status === 'error'){
+          area.innerHTML = `<span style="color:#ff6b6b;">Erro no processamento: ${s.error||'desconhecido'}</span>`;
+          return;
+        }
+        setTimeout(pollStatus, 2000);
+      }catch(e){
+        area.innerHTML = '<span style="color:#ff6b6b;">Perdi a conexão com o servidor.</span>';
+      }
+    }
+  }catch(e){
+    console.error(e);
+    area.innerHTML = `<span style="color:#ff6b6b;">Erro: ${e.message||'não consegui falar com o servidor'}. Confere se a URL do backend está certa e se o serviço está no ar.</span>`;
+  }
+});
 
 document.getElementById('randomPlayBtn').onclick = ()=>{
   let ball = entities.find(e=>e.team==='ball');
