@@ -74,7 +74,6 @@
       <div class="sep"></div>
       <button id="play2DTop" class="iconbtn"><span class="ic">▶️</span>2D</button>
       <div class="sep"></div>
-      <button id="saveBtn" class="iconbtn primary"><span class="ic">💾</span>Salvar</button>
       <button id="saveMovementBtn" class="iconbtn primary"><span class="ic">🏃</span>Salvar jogada</button>
       <button id="loadMovementBtn" class="iconbtn"><span class="ic">📂</span>Jogadas</button>
       <button id="importBtn" class="iconbtn"><span class="ic">📥</span>Importar</button>
@@ -82,10 +81,12 @@
       <button id="importVideoBtn" class="iconbtn primary"><span class="ic">🎥</span>Importar de vídeo</button>
       <input type="file" id="importVideoInput" accept="video/*" style="display:none">
       <div class="sep"></div>
-      <button id="randomPlayBtn" class="iconbtn warn"><span class="ic">⚔️</span>ALEATÓRIO JOGADA</button>
       <button id="remixBtn" class="iconbtn warn"><span class="ic">🧩</span>Remontar jogadas</button>
       <button id="patternPlayBtn" class="iconbtn warn"><span class="ic">📊</span>Jogada com padrão</button>
       <button id="goto3D" class="iconbtn primary"><span class="ic">🎬</span>Ver 3D</button>
+      <div class="sep"></div>
+      <button id="trainModeBtn" class="iconbtn warn"><span class="ic">🧠</span>Reconhecimento</button>
+      <button id="trainStatsBtn" class="iconbtn"><span class="ic">📊</span>Estatísticas</button>
       <span id="status"></span>
     </div>
     <div id="stepbar">
@@ -212,6 +213,16 @@
           <div id="passTargetList" style="display:flex;flex-direction:column;gap:8px;max-height:320px;overflow-y:auto;"></div>
           <button id="passTargetCancel" style="margin-top:12px;width:100%;padding:10px;background:#2a2a2a;border:1px solid #444;color:#eee;border-radius:8px;font-size:13px;">Cancelar</button>
         </div>
+      </div>
+      <div id="trainingOverlay" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;flex-direction:column;gap:14px;background:rgba(0,0,0,0.6);z-index:50;padding:20px;box-sizing:border-box;">
+        <div id="trainingQuestion" style="font-size:19px;font-weight:800;color:#fff;text-align:center;">Qual é a situação?</div>
+        <div id="trainingChoices" style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;max-width:360px;"></div>
+        <div id="trainingResult" style="font-size:16px;font-weight:700;text-align:center;min-height:24px;"></div>
+        <div style="display:flex;gap:10px;">
+          <button id="trainingAerialBtn" style="display:none;background:#2a2a2a;border:1px solid #444;color:#eee;padding:10px 16px;border-radius:8px;font-size:13px;">👁️ Ver de cima</button>
+          <button id="trainingNextBtn" style="display:none;background:#2c4270;border:1px solid #3d5a95;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;">Próxima situação →</button>
+        </div>
+        <button id="trainingExitBtn" style="margin-top:6px;background:transparent;border:none;color:#888;font-size:12px;">Sair do modo Reconhecimento</button>
       </div>
     </div>
     <div id="bottombar" style="flex-direction:column;align-items:stretch;gap:8px;padding-bottom:max(18px, env(safe-area-inset-bottom));">
@@ -714,6 +725,104 @@ function addEntityToAllSteps(id, pos){
   steps.forEach(st=>{ if(!st.positions[id]) st.positions[id] = {x:pos.x, y:pos.y, facingAngle:pos.facingAngle, customFacing:false}; });
 }
 function randomHeightM(){ return 1.70 + Math.random()*0.10; } // 1.70 a 1.80m
+function clamp01(v){ return Math.max(0.05, Math.min(0.95, v)); }
+
+// ---------------------------------------------------------------------------
+// MOTOR DE SITUAÇÃO — o núcleo do treino cognitivo. Não conta só quantos
+// jogadores tem em quadra: calcula quem está de verdade "dentro da jogada"
+// (perto o suficiente da bola/ação) e quem está fora dela.
+// ---------------------------------------------------------------------------
+const ACTIVE_RADIUS = 0.34; // fração da quadra — jogador mais longe que isso da bola é "inativo" na jogada
+function computeActivePlayers(positions, ballId){
+  const ballPos = positions[ballId];
+  const out = {activeBlue:[], activeRed:[], inactiveBlue:[], inactiveRed:[]};
+  if(!ballPos) return out;
+  entities.forEach(e=>{
+    if(e.team==='ball') return;
+    const p = positions[e.id];
+    if(!p) return;
+    const dx = (p.x-ballPos.x)*COURT_WID, dy = (p.y-ballPos.y)*COURT_LEN;
+    const dist = Math.hypot(dx,dy) / COURT_LEN;
+    const active = dist <= ACTIVE_RADIUS;
+    if(e.team==='blue') (active?out.activeBlue:out.inactiveBlue).push(e);
+    else (active?out.activeRed:out.inactiveRed).push(e);
+  });
+  return out;
+}
+function classifySituation(positions, ballId){
+  const active = computeActivePlayers(positions, ballId);
+  const ballPos = positions[ballId];
+  const nAtk = active.activeBlue.length, nDef = active.activeRed.length;
+  let label = `${nAtk}x${nDef}`;
+  if(nDef===0 && nAtk>=1) label = 'contra-ataque';
+  const ballSide = !ballPos ? 'centro' : (ballPos.x<0.4?'esquerda':(ballPos.x>0.6?'direita':'centro'));
+  const zone = !ballPos ? 'meio' : (ballPos.y<0.15?'bola no fundo':(ballPos.y<0.35?'ataque':'meio de quadra'));
+  return {label, nAtk, nDef, ballSide, zone, active};
+}
+
+// gera uma situação de treino: sorteia uma composição-alvo (ex: 3x2), monta
+// os jogadores ativos perto da bola, E adiciona jogadores extras longe da
+// ação — pra treinar "estrutura da jogada", não "contar bonecos" (seção 3)
+const SITUATION_POOL = [
+  {label:'1x1', atk:1, def:1}, {label:'2x1', atk:2, def:1}, {label:'2x2', atk:2, def:2},
+  {label:'3x2', atk:3, def:2}, {label:'3x3', atk:3, def:3}, {label:'4x3', atk:4, def:3}, {label:'4x4', atk:4, def:4},
+];
+function generateTrainingSituation(){
+  const target = SITUATION_POOL[Math.floor(Math.random()*SITUATION_POOL.length)];
+
+  entities = []; steps = [{positions:{}}]; currentStep = 0;
+  idCounter = 1; nextBlueNum = 1; nextRedNum = 1;
+
+  const ballId = idCounter++;
+  entities.push({id:ballId, team:'ball', number:'', name:''});
+  const actionX = 0.2 + Math.random()*0.6;
+  const actionY = 0.08 + Math.random()*0.35; // perto do gol que o time azul ataca (y menor)
+  steps[0].positions[ballId] = {x:actionX, y:actionY};
+
+  const activeBlueIds = [];
+  for(let i=0;i<target.atk;i++){
+    const id = idCounter++;
+    entities.push({id, team:'blue', number:nextBlueNum++, name:'', heightM:randomHeightM()});
+    const ang = Math.random()*Math.PI*2, dist = 0.03+Math.random()*0.13;
+    steps[0].positions[id] = {x:clamp01(actionX+Math.cos(ang)*dist), y:clamp01(actionY+Math.sin(ang)*dist*0.6), facingAngle:-Math.PI/2, customFacing:false};
+    activeBlueIds.push(id);
+  }
+  for(let i=0;i<target.def;i++){
+    const id = idCounter++;
+    entities.push({id, team:'red', number:nextRedNum++, name:'', heightM:randomHeightM()});
+    const ang = Math.random()*Math.PI*2, dist = 0.03+Math.random()*0.13;
+    steps[0].positions[id] = {x:clamp01(actionX+Math.cos(ang)*dist), y:clamp01(actionY+Math.sin(ang)*dist*0.6), facingAngle:Math.PI/2, customFacing:false};
+  }
+  // decoys: jogadores de verdade em quadra, mas fora do raio de ação —
+  // exatamente o que faz "contar bonecos" dar errado
+  const extraBlue = Math.floor(Math.random()*3), extraRed = Math.floor(Math.random()*3);
+  for(let i=0;i<extraBlue;i++){
+    const id = idCounter++;
+    entities.push({id, team:'blue', number:nextBlueNum++, name:'', heightM:randomHeightM()});
+    steps[0].positions[id] = {x:clamp01(Math.random()), y:clamp01(0.55+Math.random()*0.4), facingAngle:-Math.PI/2, customFacing:false};
+  }
+  for(let i=0;i<extraRed;i++){
+    const id = idCounter++;
+    entities.push({id, team:'red', number:nextRedNum++, name:'', heightM:randomHeightM()});
+    steps[0].positions[id] = {x:clamp01(Math.random()), y:clamp01(0.55+Math.random()*0.4), facingAngle:Math.PI/2, customFacing:false};
+  }
+
+  recomputeAutoFacing(0);
+  // uma etapa seguinte com movimento leve, pra ter ação em vez de foto parada
+  const copy = {};
+  Object.keys(steps[0].positions).forEach(id=>{
+    const p = steps[0].positions[id];
+    copy[id] = {...p, x:clamp01(p.x+(Math.random()-0.5)*0.07), y:clamp01(p.y+(Math.random()-0.5)*0.07)};
+  });
+  steps.push({positions:copy});
+  recomputeAutoFacing(1);
+
+  const situation = classifySituation(steps[0].positions, ballId);
+  const povId = activeBlueIds[Math.floor(Math.random()*activeBlueIds.length)];
+  selectedId = povId;
+  return {label: situation.label, povId, ballSide: situation.ballSide, zone: situation.zone};
+}
+
 
 function populateBaseSquad(){
   const blueXs = [0.2,0.4,0.6,0.8];
@@ -875,7 +984,6 @@ async function loadBoard(){
     }
   }catch(e){}
 }
-document.getElementById('saveBtn').onclick = saveBoard;
 
 document.getElementById('importBtn').onclick = ()=> document.getElementById('importInput').click();
 function applyImportedPlay(data){
@@ -1126,112 +1234,6 @@ document.getElementById('importVideoInput').addEventListener('change', async (ev
     area.innerHTML = `<span style="color:#ff6b6b;">Erro: ${e.message||'não consegui falar com o servidor'}. Confere se a URL do backend está certa e se o serviço está no ar.</span>`;
   }
 });
-
-document.getElementById('randomPlayBtn').onclick = ()=>{
-  let ball = entities.find(e=>e.team==='ball');
-  if(!ball){
-    const id = idCounter++;
-    ball = {id, team:'ball', number:'', name:''};
-    entities.push(ball);
-  }
-  const blues = entities.filter(e=>e.team==='blue');
-  const reds = entities.filter(e=>e.team==='red');
-  if(blues.length===0 || reds.length===0){
-    alert('Precisa ter pelo menos 1 jogador azul e 1 vermelho em quadra pra gerar a jogada.');
-    return;
-  }
-
-  const clamp01 = v => Math.max(0.05, Math.min(0.95, v));
-
-  // reseta pra uma etapa inicial: azul no próprio campo atacando pra y=0 (o
-  // gol), vermelho posicionado como defesa entre o azul e o gol.
-  steps = [{positions:{}}];
-  currentStep = 0;
-  blues.forEach((e,i)=>{
-    const x = blues.length>1 ? 0.15 + (i/(blues.length-1))*0.7 : 0.5;
-    steps[0].positions[e.id] = {x: clamp01(x+(Math.random()-0.5)*0.06), y: clamp01(0.78+Math.random()*0.1), facingAngle:-Math.PI/2, customFacing:false};
-  });
-  reds.forEach((e,i)=>{
-    const x = reds.length>1 ? 0.15 + (i/(reds.length-1))*0.7 : 0.5;
-    steps[0].positions[e.id] = {x: clamp01(x+(Math.random()-0.5)*0.06), y: clamp01(0.28+Math.random()*0.12), facingAngle:Math.PI/2, customFacing:false};
-  });
-
-  // sorteia quem vai carregar a bola — esse é o jogador que você vai controlar
-  const carrier = blues[Math.floor(Math.random()*blues.length)];
-  steps[0].positions[ball.id] = {x: steps[0].positions[carrier.id].x, y: clamp01(steps[0].positions[carrier.id].y-0.03)};
-
-  const NUM_STEPS = 6;
-  for(let s=1; s<=NUM_STEPS; s++){
-    const prev = steps[s-1].positions;
-    const next = {};
-
-    // o portador avança em direção ao gol, com leve drible lateral
-    const cp = prev[carrier.id];
-    const advance = 0.085 + Math.random()*0.06;
-    const drift = (Math.random()-0.5)*0.12;
-    const cx = clamp01(cp.x + drift);
-    const cy = clamp01(cp.y - advance);
-    next[carrier.id] = {x:cx, y:cy, facingAngle:cp.facingAngle, customFacing:false};
-    next[ball.id] = {x:cx, y:clamp01(cy+0.02)};
-
-    // apoio: os outros atacantes avançam junto, se espalhando pra abrir espaço
-    blues.forEach(e=>{
-      if(e.id===carrier.id) return;
-      const p = prev[e.id];
-      const adv = 0.05 + Math.random()*0.06;
-      const lateral = (Math.random()-0.5)*0.06;
-      next[e.id] = {x:clamp01(p.x+lateral), y:clamp01(p.y-adv), facingAngle:p.facingAngle, customFacing:false};
-    });
-
-    // defesa: por padrão, cada vermelho já marca o azul de mesmo número (tipo
-    // "vermelho 1 sempre vai atrás do azul 1") — dá pra sobrescrever tocando
-    // duas vezes no jogador e definindo outro número em "Marca o nº"
-    const explicitMarks = {};
-    reds.forEach(e=>{
-      const wanted = e.markNumber || e.number;
-      const target = blues.find(b=>String(b.number)===String(wanted));
-      if(target) explicitMarks[e.id] = target;
-    });
-    const freeReds = reds.filter(e=>!explicitMarks[e.id]);
-    let nearest = null, nearestDist = Infinity;
-    freeReds.forEach(e=>{
-      const p = prev[e.id];
-      const d = Math.hypot(p.x-cx, p.y-cy);
-      if(d<nearestDist){ nearestDist=d; nearest=e; }
-    });
-    reds.forEach(e=>{
-      const p = prev[e.id];
-      let tx, ty;
-      if(explicitMarks[e.id]){
-        const tgt = explicitMarks[e.id];
-        const tgtPos = next[tgt.id] || prev[tgt.id];
-        const closeFactor = 0.6;
-        tx = p.x + (tgtPos.x-p.x)*closeFactor;
-        ty = p.y + (tgtPos.y-p.y)*closeFactor;
-      } else if(nearest && e.id===nearest.id){
-        const closeFactor = 0.55; // fecha em cima, mas não gruda 100%
-        tx = p.x + (cx-p.x)*closeFactor;
-        ty = p.y + (cy-p.y)*closeFactor;
-      } else {
-        tx = p.x + (Math.random()-0.5)*0.05;
-        ty = p.y - 0.015 + Math.random()*0.03; // recompõe, cobrindo espaço
-      }
-      next[e.id] = {x:clamp01(tx), y:clamp01(ty), facingAngle:p.facingAngle, customFacing:false};
-    });
-
-    steps.push({positions:next});
-  }
-
-  recomputeAllStepsAutoFacing();
-  currentStep = 0;
-  selectedId = carrier.id;
-  updateStepUI();
-  draw();
-
-  // vai pro 3D e já deixa reproduzindo a jogada — você entra no "🎮 Controlar"
-  // quando quiser assumir a decisão
-  document.getElementById('goto3D').click();
-};
 
 document.getElementById('remixBtn').onclick = async ()=>{
   const index = await ensureMovementsIndex();
@@ -2294,6 +2296,7 @@ function animate3D(){
     const tt = three.t;
     document.getElementById('time3DLabel').textContent = `${tt.toFixed(1)}s / ${dur.toFixed(1)}s`;
     render3DFrame(tt, dur, durs);
+    checkTrainingPause();
     if(three.qte && !three.qte.resolved){
       const elapsed = performance.now() - three.qte.start;
       const remain = Math.max(0, 1 - elapsed/three.qte.duration);
@@ -2620,7 +2623,7 @@ function render3DFrame(tt, dur, durs){
   });
 
   const povEntity = three.snap.entities.find(e=>e.id===three.povId);
-  if(povEntity && povSample){
+  if(povEntity && povSample && !three.trainingAerialLock){
     const s = povSample;
     const v = povVel;
     const speedA = Math.min(v.length(), 11);
@@ -2692,6 +2695,9 @@ document.getElementById('goto3D').onclick = ()=>{
   document.getElementById('viewer3DModeBadge').textContent = 'PRIMEIRA PESSOA';
   three.t = 0; three.playing = true;
   three.triggeredPivotSteps = new Set();
+  three.trainingAerialLock = false;
+  trainingCurrent = null;
+  document.getElementById('trainingOverlay').style.display = 'none';
   document.getElementById('play3DBtn').textContent = '⏸ Pausar';
   setTimeout(refreshThreeSize, 30);
   requestAnimationFrame(animate3D);
@@ -2863,6 +2869,141 @@ function resolveQTE(success, chosenTargetId){
     }
   }, success ? 900 : 1100);
 }
+
+// ---------------------------------------------------------------------------
+// MODO RECONHECIMENTO — joga a situação em 1ª pessoa, pausa sozinho depois de
+// um tempo curto e aleatório, pergunta "qual é a situação?", cronometra e
+// registra o desempenho. Sem HUD entregando a resposta.
+// ---------------------------------------------------------------------------
+const TRAINING_STATS_KEY = 'training_stats';
+let trainingStats = [];
+let trainingCurrent = null;
+loadTrainingStats();
+async function loadTrainingStats(){
+  try{ const r = await storageGet(TRAINING_STATS_KEY); if(r&&r.value) trainingStats = JSON.parse(r.value); }catch(e){}
+}
+async function saveTrainingStats(){
+  try{ await storageSet(TRAINING_STATS_KEY, JSON.stringify(trainingStats.slice(-500))); }catch(e){}
+}
+
+document.getElementById('trainModeBtn').onclick = ()=>{
+  const sit = generateTrainingSituation();
+  updateStepUI(); draw(); refreshPovSelect();
+  document.getElementById('goto3D').click();
+  setTimeout(()=> startTrainingRound(sit), 200);
+};
+
+function startTrainingRound(sit){
+  three.trainingAerialLock = false;
+  three.povId = sit.povId;
+  const sel = document.getElementById('povSelect');
+  if(sel) sel.value = sit.povId;
+  three.t = 0; three.playing = true;
+  three.transition = null; three.freeLookYaw = 0; three.freeLookPitch = 0;
+  trainingCurrent = {...sit, asked:false, pauseAt: performance.now() + (500 + Math.random()*1500)};
+  document.getElementById('viewer3DModeBadge').textContent = 'RECONHECIMENTO';
+  document.getElementById('trainingOverlay').style.display = 'none';
+}
+
+function checkTrainingPause(){
+  if(!trainingCurrent || trainingCurrent.asked || !three.playing) return;
+  if(performance.now() >= trainingCurrent.pauseAt){
+    trainingCurrent.asked = true;
+    three.playing = false;
+    showSituationQuiz();
+  }
+}
+
+function showSituationQuiz(){
+  const allLabels = ['1x1','2x1','2x2','3x2','3x3','4x3','4x4','contra-ataque'];
+  let choices = allLabels.filter(l=>l!==trainingCurrent.label).sort(()=>Math.random()-0.5).slice(0,4);
+  choices.push(trainingCurrent.label);
+  choices.sort(()=>Math.random()-0.5);
+  const list = document.getElementById('trainingChoices');
+  list.innerHTML = '';
+  document.getElementById('trainingQuestion').textContent = 'Qual é a situação?';
+  document.getElementById('trainingResult').textContent = '';
+  document.getElementById('trainingNextBtn').style.display = 'none';
+  document.getElementById('trainingAerialBtn').style.display = 'none';
+  const askedAt = performance.now();
+  choices.forEach(c=>{
+    const btn = document.createElement('button');
+    btn.className = 'trainChoiceBtn';
+    btn.style.cssText = 'padding:12px 16px;background:#2c4270;border:1px solid #3d5a95;color:#fff;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;';
+    btn.textContent = c;
+    btn.onclick = ()=> answerTraining(c, askedAt);
+    list.appendChild(btn);
+  });
+  document.getElementById('trainingOverlay').style.display = 'flex';
+}
+
+function answerTraining(answer, askedAt){
+  const reactionMs = Math.round(performance.now() - askedAt);
+  const correct = answer === trainingCurrent.label;
+  trainingStats.push({label: trainingCurrent.label, correct, reactionMs, ts: Date.now()});
+  saveTrainingStats();
+  document.querySelectorAll('.trainChoiceBtn').forEach(b=>{
+    b.disabled = true;
+    if(b.textContent === trainingCurrent.label) b.style.background = '#2c7a3f';
+    else if(b.textContent === answer) b.style.background = '#7a2c2c';
+  });
+  document.getElementById('trainingResult').innerHTML = correct
+    ? `✅ Isso! Era <b>${trainingCurrent.label}</b> (${reactionMs}ms)`
+    : `❌ Era <b>${trainingCurrent.label}</b> — você respondeu ${answer} (${reactionMs}ms)`;
+  document.getElementById('trainingResult').style.color = correct ? '#4ade80' : '#ff6b6b';
+  document.getElementById('trainingNextBtn').style.display = 'inline-block';
+  document.getElementById('trainingAerialBtn').style.display = 'inline-block';
+}
+
+document.getElementById('trainingAerialBtn').onclick = ()=>{
+  three.trainingAerialLock = true;
+  three.transition = null;
+  three.camera.position.set(0, 26, 0.001);
+  three.camera.up.set(0, 0, -1);
+  three.camera.lookAt(0, 0, 0);
+};
+document.getElementById('trainingNextBtn').onclick = ()=>{
+  const sit = generateTrainingSituation();
+  updateStepUI(); draw(); refreshPovSelect();
+  rebuild3DScene();
+  startTrainingRound(sit);
+};
+document.getElementById('trainingExitBtn').onclick = ()=>{
+  trainingCurrent = null;
+  three.trainingAerialLock = false;
+  document.getElementById('trainingOverlay').style.display = 'none';
+  document.getElementById('viewer3DModeBadge').textContent = 'PRIMEIRA PESSOA';
+  document.getElementById('backTo2D').click();
+};
+
+function computeTrainingStatsSummary(){
+  const byLabel = {};
+  trainingStats.forEach(s=>{
+    byLabel[s.label] = byLabel[s.label] || {n:0, correct:0, totalMs:0};
+    byLabel[s.label].n++;
+    if(s.correct) byLabel[s.label].correct++;
+    byLabel[s.label].totalMs += s.reactionMs;
+  });
+  let streak = 0;
+  for(let i=trainingStats.length-1; i>=0; i--){
+    if(trainingStats[i].correct) streak++; else break;
+  }
+  return {byLabel, streak, total: trainingStats.length};
+}
+document.getElementById('trainStatsBtn').onclick = ()=>{
+  const {byLabel, streak, total} = computeTrainingStatsSummary();
+  const rows = Object.keys(byLabel).sort().map(label=>{
+    const s = byLabel[label];
+    const pct = Math.round(s.correct/s.n*100);
+    const avgMs = Math.round(s.totalMs/s.n);
+    return `<div class="movementItem"><span class="mname">${label}</span><span class="mdate">${pct}% acerto · ${avgMs}ms médio · ${s.n} tentativa(s)</span></div>`;
+  }).join('') || '<div style="color:#999;font-size:13px;">Nenhuma tentativa registrada ainda. Usa o "🧠 Reconhecimento" pra treinar.</div>';
+  const overlay = openModal(`<h3>📊 Estatísticas — Reconhecimento</h3>
+    <div style="color:#ccc;font-size:13px;margin-bottom:10px;">Sequência atual: <b>${streak}</b> acerto(s) seguido(s) · Total: ${total} situações</div>
+    ${rows}
+    <div class="modalBtnRow"><button class="secondary" id="statsCloseBtn">Fechar</button></div>`);
+  document.getElementById('statsCloseBtn').onclick = ()=> overlay.remove();
+};
 
 document.getElementById('povSelect').addEventListener('change', (e)=>{
   three.povId = parseInt(e.target.value);
