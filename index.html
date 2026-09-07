@@ -126,6 +126,10 @@
       <button id="speedToggleBtn" class="txt">⏱ Velocidade: 1x</button>
       <button id="fullscreenBtn" class="txt">⛶ Tela cheia</button>
       <button id="focusModeBtn" class="txt primary">🖥️ Só o 3D</button>
+      <div class="sep"></div>
+      <button id="camFpBtn" class="txt primary">🎥 1ª pessoa</button>
+      <button id="camAerialBtn" class="txt">👁️ De cima</button>
+      <button id="camBroadcastBtn" class="txt">📹 Câmera TV</button>
     </div>
     <div id="speedToolbar" style="display:none;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 14px;background:#101010;border-bottom:1px solid #262626;">
       <button class="txt" data-spd3d="0.25">0.25x</button>
@@ -923,16 +927,19 @@ function generateTrainingSituation(){
 
   const ballId = idCounter++;
   entities.push({id:ballId, team:'ball', number:'', name:''});
+  // numeridade (3x2, 3x1 etc) só acontece no campo adversário, no meio de
+  // quadra, ou um pouco atrás do meio (transição) — nunca lá no fundo da
+  // própria defesa. O azul SEMPRE ataca pra y=0 (mesma convenção usada em
+  // toda a aplicação: câmera, goleiro, marcação) — nunca inverte o lado.
   const actionX = 0.25 + Math.random()*0.5;
-  const actionY = 0.1 + Math.random()*0.3;
-  const mirror = Math.random()<0.5 ? -1 : 1; // espelha esquerda/direita pra variar
-  const attackDown = Math.random()<0.5; // 50% ataca pra y menor, 50% pra y maior (espelha o modelo)
+  const actionY = 0.05 + Math.random()*0.55; // até um pouco depois do meio (0.5), nunca mais fundo que isso
+  const mirror = Math.random()<0.5 ? -1 : 1; // espelha só esquerda/direita, nunca o lado do ataque
   steps[0].positions[ballId] = {x:actionX, y:actionY};
 
   const activeBlueIds = [];
   template.players.forEach(tp=>{
     const id = idCounter++;
-    const dy = attackDown ? tp.dy : -tp.dy;
+    const dy = tp.dy;
     const dx = tp.dx * mirror;
     const pos = {x:clamp01(actionX+dx), y:clamp01(actionY+dy), facingAngle:(tp.team==='blue'?-Math.PI/2:Math.PI/2), customFacing:false};
     if(tp.team==='blue'){
@@ -2847,7 +2854,8 @@ document.getElementById('goto3D').onclick = ()=>{
   document.getElementById('viewer3DModeBadge').textContent = 'PRIMEIRA PESSOA';
   three.t = 0; three.playing = true;
   three.triggeredPivotSteps = new Set();
-  three.trainingAerialLock = false;
+  exitReviewCamera();
+  setActiveCamBtn('camFpBtn');
   trainingCurrent = null;
   document.getElementById('trainingOverlay').style.display = 'none';
   document.getElementById('play3DBtn').textContent = '⏸ Pausar';
@@ -2866,6 +2874,8 @@ document.getElementById('backTo2D').onclick = ()=>{
   layoutCanvas();
 };
 document.getElementById('controlModeBtn').onclick = ()=>{
+  exitReviewCamera();
+  setActiveCamBtn('camFpBtn');
   three.controlMode = !three.controlMode;
   document.getElementById('controlPad').style.display = three.controlMode ? 'flex' : 'none';
   document.getElementById('controlModeBtn').textContent = three.controlMode ? '🎬 Voltar ao lance' : '🎮 Controlar';
@@ -3050,9 +3060,8 @@ document.getElementById('trainModeBtn').onclick = ()=>{
 };
 
 function startTrainingRound(sit){
-  three.trainingAerialLock = false;
-  const roofSeg = three.backdrops && three.backdrops.roof && three.backdrops.roof.segments[0];
-  if(roofSeg && roofSeg.mesh && three.roofWasVisible!=null) roofSeg.mesh.visible = three.roofWasVisible;
+  exitReviewCamera();
+  setActiveCamBtn('camFpBtn');
   three.povId = sit.povId;
   const sel = document.getElementById('povSelect');
   if(sel) sel.value = sit.povId;
@@ -3118,12 +3127,28 @@ function answerTraining(answer, askedAt){
 function enterReviewCamera(){
   three.trainingAerialLock = true;
   three.transition = null;
-  // esconde o teto durante a revisão — senão a câmera de cima olha direto
-  // pra baixo do teto e a tela fica toda cinza (o "bug" que você viu)
-  const roofSeg = three.backdrops && three.backdrops.roof && three.backdrops.roof.segments[0];
-  if(roofSeg && roofSeg.mesh){
-    three.roofWasVisible = roofSeg.mesh.visible;
-    roofSeg.mesh.visible = false;
+  // esconde teto, paredes de fundo e arquibancada durante a revisão — pra
+  // câmera nunca ficar bloqueada/atrapalhada por nenhuma parede, não importa
+  // de onde ela estiver olhando
+  if(!three.hiddenForReview){
+    const toHide = [];
+    if(three.backdrops){
+      Object.values(three.backdrops).forEach(bd=>{
+        if(bd && bd.segments) bd.segments.forEach(seg=>{ if(seg.mesh) toHide.push(seg.mesh); });
+      });
+    }
+    if(three.sideExtras){
+      Object.values(three.sideExtras).forEach(m=>{ if(m) toHide.push(m); });
+    }
+    three.hiddenForReview = toHide.map(mesh=>({mesh, wasVisible: mesh.visible}));
+    toHide.forEach(mesh=>{ mesh.visible = false; });
+  }
+}
+function exitReviewCamera(){
+  three.trainingAerialLock = false;
+  if(three.hiddenForReview){
+    three.hiddenForReview.forEach(({mesh, wasVisible})=>{ mesh.visible = wasVisible; });
+    three.hiddenForReview = null;
   }
 }
 document.getElementById('trainingAerialBtn').onclick = ()=>{
@@ -3139,6 +3164,36 @@ document.getElementById('trainingBroadcastBtn').onclick = ()=>{
   three.camera.up.set(0, 1, 0);
   three.camera.lookAt(0, 1, 0);
 };
+
+// ---- botões de câmera sempre disponíveis, em qualquer modo (não só depois
+// de responder o quiz de reconhecimento) ----
+function setActiveCamBtn(id){
+  ['camFpBtn','camAerialBtn','camBroadcastBtn'].forEach(b=>{
+    document.getElementById(b).classList.toggle('primary', b===id);
+  });
+}
+document.getElementById('camFpBtn').onclick = ()=>{
+  if(!three) return;
+  exitReviewCamera();
+  setActiveCamBtn('camFpBtn');
+};
+document.getElementById('camAerialBtn').onclick = ()=>{
+  if(!three) return;
+  enterReviewCamera();
+  three.camera.position.set(0, 26, 0.001);
+  three.camera.up.set(0, 0, -1);
+  three.camera.lookAt(0, 0, 0);
+  setActiveCamBtn('camAerialBtn');
+};
+document.getElementById('camBroadcastBtn').onclick = ()=>{
+  if(!three) return;
+  enterReviewCamera();
+  three.camera.position.set(0, 15, COURT_WID/2 + 15);
+  three.camera.up.set(0, 1, 0);
+  three.camera.lookAt(0, 1, 0);
+  setActiveCamBtn('camBroadcastBtn');
+};
+
 document.getElementById('trainingNextBtn').onclick = ()=>{
   const sit = generateTrainingSituation();
   if(!sit){ document.getElementById('trainingExitBtn').click(); return; }
