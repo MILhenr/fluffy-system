@@ -222,6 +222,7 @@
         <div id="trainingResult" style="font-size:16px;font-weight:700;text-align:center;min-height:24px;"></div>
         <div style="display:flex;gap:10px;">
           <button id="trainingAerialBtn" style="display:none;background:#2a2a2a;border:1px solid #444;color:#eee;padding:10px 16px;border-radius:8px;font-size:13px;">👁️ Ver de cima</button>
+          <button id="trainingBroadcastBtn" style="display:none;background:#2a2a2a;border:1px solid #444;color:#eee;padding:10px 16px;border-radius:8px;font-size:13px;">📹 Câmera de TV</button>
           <button id="trainingNextBtn" style="display:none;background:#2c4270;border:1px solid #3d5a95;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;">Próxima situação →</button>
         </div>
         <button id="trainingExitBtn" style="margin-top:6px;background:transparent;border:none;color:#888;font-size:12px;">Sair do modo Reconhecimento</button>
@@ -486,6 +487,10 @@ function drawEntityAt(e, pos, isPlaying){
   ctx.font = `700 ${Math.round(R*0.85)}px -apple-system, sans-serif`;
   ctx.textAlign='center'; ctx.textBaseline='middle';
   ctx.fillText(String(e.number), p.x, p.y+1);
+  if(e.isGoalkeeper){
+    ctx.font = `${Math.round(R*0.7)}px -apple-system, sans-serif`;
+    ctx.fillText('🧤', p.x+R*0.85, p.y-R*0.85);
+  }
   if(e.name){
     ctx.font = `500 ${Math.round(R*0.42)}px -apple-system, sans-serif`;
     ctx.fillStyle = '#f2f2f2';
@@ -653,6 +658,10 @@ canvas.addEventListener('pointermove', (ev)=>{
   if(!dragging) return;
   const f = toFrac(p.x,p.y);
   f.x = Math.min(1.03, Math.max(-0.03, f.x)); f.y = Math.min(1.03, Math.max(-0.03, f.y));
+  if(dragging.isGoalkeeper){
+    f.x = Math.max(0.28, Math.min(0.72, f.x));
+    f.y = dragging.team==='blue' ? Math.max(0.85, Math.min(0.99, f.y)) : Math.max(0.01, Math.min(0.15, f.y));
+  }
   const pos = steps[currentStep].positions[dragging.id];
   const dx = f.x - pos.x, dy = f.y - pos.y;
   pos.x = f.x; pos.y = f.y;
@@ -691,14 +700,35 @@ function openEditPopup(entity){
     <div class="row"><input id="popNum" type="text" placeholder="Número" value="${entity.number}"></div>
     <div class="row"><input id="popName" type="text" placeholder="Nome" value="${entity.name||''}"></div>
     <div class="row"><input id="popMark" type="text" placeholder="Marca o nº (time adversário)" value="${entity.markNumber||''}" style="width:160px;"></div>
+    <div class="row" style="align-items:center;gap:6px;"><input id="popGK" type="checkbox" ${entity.isGoalkeeper?'checked':''} style="width:auto;"><label for="popGK" style="font-size:12px;color:#ddd;">🧤 É o goleiro (não sai da área)</label></div>
     <div class="row"><button id="popOk">OK</button></div>`;
   document.body.appendChild(pop);
   document.getElementById('popOk').onclick = ()=>{
     entity.number = document.getElementById('popNum').value || entity.number;
     entity.name = document.getElementById('popName').value;
     entity.markNumber = document.getElementById('popMark').value.trim();
+    const wantsGK = document.getElementById('popGK').checked;
+    if(wantsGK){
+      // só um goleiro por time — desmarca qualquer outro
+      entities.forEach(e=>{ if(e.team===entity.team && e.id!==entity.id) e.isGoalkeeper = false; });
+      entity.isGoalkeeper = true;
+      clampGoalkeeperPosition(entity);
+    } else {
+      entity.isGoalkeeper = false;
+    }
     pop.remove(); draw(); refreshPovSelect();
   };
+}
+function clampGoalkeeperPosition(entity){
+  // o goleiro nunca sai da área do próprio gol — azul defende y perto de 1,
+  // vermelho defende y perto de 0 (mesma convenção usada no resto do app)
+  Object.values(steps).forEach(()=>{});
+  steps.forEach(st=>{
+    const p = st.positions[entity.id];
+    if(!p) return;
+    p.x = Math.max(0.28, Math.min(0.72, p.x));
+    p.y = entity.team==='blue' ? Math.max(0.85, Math.min(0.99, p.y)) : Math.max(0.01, Math.min(0.15, p.y));
+  });
 }
 document.addEventListener('click', (ev)=>{
   if(!ev.target.closest('.editPop') && !ev.target.closest('#courtCanvas')) document.querySelectorAll('.editPop').forEach(e=>e.remove());
@@ -958,7 +988,9 @@ function populateBaseSquad(){
   });
   recomputeAllStepsAutoFacing();
 }
+const MAX_TEAM_SIZE = 5; // futsal: 4 de linha + 1 goleiro
 document.getElementById('addBlue').onclick = ()=>{
+  if(entities.filter(e=>e.team==='blue').length>=MAX_TEAM_SIZE){ alert('Máximo de 5 jogadores azuis (4 de linha + 1 goleiro).'); return; }
   const id = idCounter++;
   const pos = {x:0.5+Math.random()*0.1-0.05, y:0.35, facingAngle:-Math.PI/2};
   entities.push({id, team:'blue', number:nextBlueNum++, name:'', heightM:randomHeightM()});
@@ -967,6 +999,7 @@ document.getElementById('addBlue').onclick = ()=>{
   draw(); refreshPovSelect();
 };
 document.getElementById('addRed').onclick = ()=>{
+  if(entities.filter(e=>e.team==='red').length>=MAX_TEAM_SIZE){ alert('Máximo de 5 jogadores vermelhos (4 de linha + 1 goleiro).'); return; }
   const id = idCounter++;
   const pos = {x:0.5+Math.random()*0.1-0.05, y:0.6, facingAngle:Math.PI/2};
   entities.push({id, team:'red', number:nextRedNum++, name:'', heightM:randomHeightM()});
@@ -3018,6 +3051,8 @@ document.getElementById('trainModeBtn').onclick = ()=>{
 
 function startTrainingRound(sit){
   three.trainingAerialLock = false;
+  const roofSeg = three.backdrops && three.backdrops.roof && three.backdrops.roof.segments[0];
+  if(roofSeg && roofSeg.mesh && three.roofWasVisible!=null) roofSeg.mesh.visible = three.roofWasVisible;
   three.povId = sit.povId;
   const sel = document.getElementById('povSelect');
   if(sel) sel.value = sit.povId;
@@ -3048,6 +3083,7 @@ function showSituationQuiz(){
   document.getElementById('trainingResult').textContent = '';
   document.getElementById('trainingNextBtn').style.display = 'none';
   document.getElementById('trainingAerialBtn').style.display = 'none';
+  document.getElementById('trainingBroadcastBtn').style.display = 'none';
   const askedAt = performance.now();
   choices.forEach(c=>{
     const btn = document.createElement('button');
@@ -3076,14 +3112,32 @@ function answerTraining(answer, askedAt){
   document.getElementById('trainingResult').style.color = correct ? '#4ade80' : '#ff6b6b';
   document.getElementById('trainingNextBtn').style.display = 'inline-block';
   document.getElementById('trainingAerialBtn').style.display = 'inline-block';
+  document.getElementById('trainingBroadcastBtn').style.display = 'inline-block';
 }
 
-document.getElementById('trainingAerialBtn').onclick = ()=>{
+function enterReviewCamera(){
   three.trainingAerialLock = true;
   three.transition = null;
+  // esconde o teto durante a revisão — senão a câmera de cima olha direto
+  // pra baixo do teto e a tela fica toda cinza (o "bug" que você viu)
+  const roofSeg = three.backdrops && three.backdrops.roof && three.backdrops.roof.segments[0];
+  if(roofSeg && roofSeg.mesh){
+    three.roofWasVisible = roofSeg.mesh.visible;
+    roofSeg.mesh.visible = false;
+  }
+}
+document.getElementById('trainingAerialBtn').onclick = ()=>{
+  enterReviewCamera();
   three.camera.position.set(0, 26, 0.001);
   three.camera.up.set(0, 0, -1);
   three.camera.lookAt(0, 0, 0);
+};
+document.getElementById('trainingBroadcastBtn').onclick = ()=>{
+  enterReviewCamera();
+  // câmera elevada de lado, tipo transmissão de tv vista da arquibancada
+  three.camera.position.set(0, 15, COURT_WID/2 + 15);
+  three.camera.up.set(0, 1, 0);
+  three.camera.lookAt(0, 1, 0);
 };
 document.getElementById('trainingNextBtn').onclick = ()=>{
   const sit = generateTrainingSituation();
