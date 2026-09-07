@@ -915,37 +915,49 @@ document.getElementById('importInput').addEventListener('change', (ev)=>{
 // e carrega a jogada reconstruída automaticamente.
 // ---------------------------------------------------------------------------
 const BACKEND_URL_KEY = 'video_backend_url';
-async function getBackendUrl(promptIfMissing){
+async function getSavedBackendUrl(){
   try{
     const r = await storageGet(BACKEND_URL_KEY);
     if(r && r.value) return r.value;
   }catch(e){}
-  if(!promptIfMissing) return null;
-  return new Promise((resolve)=>{
-    const overlay = openModal(`
-      <h3>Endereço do backend de vídeo</h3>
-      <p style="font-size:12.5px;color:#999;margin-top:-6px;">Cola aqui a URL do serviço que você publicou no Railway (veja o LEIA-ME.md). Só precisa fazer isso uma vez.</p>
-      <input type="text" id="backendUrlInput" placeholder="https://seu-projeto-production.up.railway.app">
-      <div class="modalBtnRow">
-        <button class="secondary" id="backendUrlCancel">Cancelar</button>
-        <button id="backendUrlOk">Salvar</button>
-      </div>`);
-    document.getElementById('backendUrlCancel').onclick = ()=>{ overlay.remove(); resolve(null); };
-    document.getElementById('backendUrlOk').onclick = async ()=>{
-      let url = document.getElementById('backendUrlInput').value.trim().replace(/\/$/,'');
-      if(!url){ resolve(null); overlay.remove(); return; }
-      await storageSet(BACKEND_URL_KEY, url);
-      overlay.remove();
-      resolve(url);
-    };
-  });
+  return '';
 }
 
 document.getElementById('importVideoBtn').onclick = async ()=>{
-  const backendUrl = await getBackendUrl(true);
-  if(!backendUrl) return;
-  document.getElementById('importVideoInput').dataset.backendUrl = backendUrl;
-  document.getElementById('importVideoInput').click();
+  const saved = await getSavedBackendUrl();
+  const overlay = openModal(`
+    <h3>Endereço do backend de vídeo</h3>
+    <p style="font-size:12.5px;color:#999;margin-top:-6px;">Confirma se essa é a URL certa do serviço que você publicou no Railway (a mesma que respondeu {"ok":true} no navegador).</p>
+    <input type="text" id="backendUrlInput" placeholder="https://seu-projeto-production.up.railway.app" value="${saved}">
+    <div id="backendTestMsg" style="font-size:12px;margin:-4px 0 8px;min-height:16px;"></div>
+    <div class="modalBtnRow">
+      <button class="secondary" id="backendUrlTest">Testar conexão</button>
+      <button class="secondary" id="backendUrlCancel">Cancelar</button>
+      <button id="backendUrlOk">Usar essa URL</button>
+    </div>`);
+  document.getElementById('backendUrlCancel').onclick = ()=> overlay.remove();
+  document.getElementById('backendUrlTest').onclick = async ()=>{
+    const msg = document.getElementById('backendTestMsg');
+    const url = document.getElementById('backendUrlInput').value.trim().replace(/\/$/,'');
+    if(!url){ msg.textContent = 'Cola a URL primeiro.'; msg.style.color = '#e0b84a'; return; }
+    msg.textContent = 'Testando...'; msg.style.color = '#999';
+    try{
+      const r = await fetch(url + '/', {method:'GET'});
+      const data = await r.json().catch(()=>null);
+      if(r.ok && data && data.ok){ msg.textContent = '✓ Respondeu certinho!'; msg.style.color = '#4ade80'; }
+      else { msg.textContent = 'Respondeu, mas de um jeito inesperado. Confere a URL.'; msg.style.color = '#e0b84a'; }
+    }catch(e){
+      msg.textContent = '✗ Não consegui conectar nessa URL.'; msg.style.color = '#ff6b6b';
+    }
+  };
+  document.getElementById('backendUrlOk').onclick = async ()=>{
+    let url = document.getElementById('backendUrlInput').value.trim().replace(/\/$/,'');
+    if(!url){ overlay.remove(); return; }
+    await storageSet(BACKEND_URL_KEY, url);
+    overlay.remove();
+    document.getElementById('importVideoInput').dataset.backendUrl = url;
+    document.getElementById('importVideoInput').click();
+  };
 };
 
 document.getElementById('importVideoInput').addEventListener('change', async (ev)=>{
