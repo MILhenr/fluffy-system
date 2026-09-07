@@ -87,6 +87,8 @@
       <div class="sep"></div>
       <button id="trainModeBtn" class="iconbtn warn"><span class="ic">🧠</span>Reconhecimento</button>
       <button id="trainStatsBtn" class="iconbtn"><span class="ic">📊</span>Estatísticas</button>
+      <button id="teachFormationBtn" class="iconbtn"><span class="ic">🎓</span>Ensinar formação</button>
+      <button id="extractFormationsBtn" class="iconbtn"><span class="ic">🔍</span>Extrair de jogadas</button>
       <span id="status"></span>
     </div>
     <div id="stepbar">
@@ -733,11 +735,12 @@ function clamp01(v){ return Math.max(0.05, Math.min(0.95, v)); }
 // (perto o suficiente da bola/ação) e quem está fora dela.
 // ---------------------------------------------------------------------------
 const ACTIVE_RADIUS = 0.34; // fração da quadra — jogador mais longe que isso da bola é "inativo" na jogada
-function computeActivePlayers(positions, ballId){
+function computeActivePlayers(positions, ballId, entitiesList){
+  entitiesList = entitiesList || entities;
   const ballPos = positions[ballId];
   const out = {activeBlue:[], activeRed:[], inactiveBlue:[], inactiveRed:[]};
   if(!ballPos) return out;
-  entities.forEach(e=>{
+  entitiesList.forEach(e=>{
     if(e.team==='ball') return;
     const p = positions[e.id];
     if(!p) return;
@@ -749,8 +752,8 @@ function computeActivePlayers(positions, ballId){
   });
   return out;
 }
-function classifySituation(positions, ballId){
-  const active = computeActivePlayers(positions, ballId);
+function classifySituation(positions, ballId, entitiesList){
+  const active = computeActivePlayers(positions, ballId, entitiesList);
   const ballPos = positions[ballId];
   const nAtk = active.activeBlue.length, nDef = active.activeRed.length;
   let label = `${nAtk}x${nDef}`;
@@ -760,41 +763,158 @@ function classifySituation(positions, ballId){
   return {label, nAtk, nDef, ballSide, zone, active};
 }
 
-// gera uma situação de treino: sorteia uma composição-alvo (ex: 3x2), monta
-// os jogadores ativos perto da bola, E adiciona jogadores extras longe da
-// ação — pra treinar "estrutura da jogada", não "contar bonecos" (seção 3)
+// composições NxM conhecidas — usadas tanto pra classificar quanto pra
+// escolher o que sortear no treino
 const SITUATION_POOL = [
-  {label:'1x1', atk:1, def:1}, {label:'2x1', atk:2, def:1}, {label:'2x2', atk:2, def:2},
-  {label:'3x2', atk:3, def:2}, {label:'3x3', atk:3, def:3}, {label:'4x3', atk:4, def:3}, {label:'4x4', atk:4, def:4},
+  {label:'1x1'}, {label:'2x1'}, {label:'2x2'},
+  {label:'3x2'}, {label:'3x3'}, {label:'4x3'}, {label:'4x4'},
 ];
+
+// ---------------------------------------------------------------------------
+// BIBLIOTECA DE MODELOS DE FORMAÇÃO — cada modelo guarda as posições
+// RELATIVAS à bola (com o ataque sempre normalizado pra "y menor"), vindas de
+// duas fontes: (1) você mesmo desenhando e marcando "isso é um 3x2de
+// verdade", ou (2) extraídas automaticamente de situações reais dentro das
+// suas jogadas salvas/importadas de vídeo. O gerador de treino sorteia entre
+// os modelos disponíveis em vez de inventar posição aleatória sem sentido.
+// ---------------------------------------------------------------------------
+const FORMATION_TEMPLATES_KEY = 'formation_templates';
+let formationTemplates = [];
+async function loadFormationTemplates(){
+  try{ const r = await storageGet(FORMATION_TEMPLATES_KEY); if(r&&r.value) formationTemplates = JSON.parse(r.value); }catch(e){}
+}
+async function saveFormationTemplates(){
+  try{ await storageSet(FORMATION_TEMPLATES_KEY, JSON.stringify(formationTemplates.slice(-300))); }catch(e){}
+}
+loadFormationTemplates();
+
+// converte uma situação (jogadores ativos + bola) num modelo relativo,
+// normalizando pra sempre atacar em direção a y menor (espelha se preciso)
+function makeTemplateFromSituation(positions, ballId, activeBlue, activeRed, attackingTowardZero){
+  const ballPos = positions[ballId];
+  const flip = attackingTowardZero ? 1 : -1; // se o ataque real ia pra y=1, inverte tudo
+  const players = [];
+  activeBlue.forEach(e=>{
+    const p = positions[e.id];
+    players.push({team:'blue', dx:(p.x-ballPos.x), dy:(p.y-ballPos.y)*flip});
+  });
+  activeRed.forEach(e=>{
+    const p = positions[e.id];
+    players.push({team:'red', dx:(p.x-ballPos.x), dy:(p.y-ballPos.y)*flip});
+  });
+  return players;
+}
+
+document.getElementById('teachFormationBtn').onclick = ()=>{
+  const overlay = openModal(`
+    <h3>🎓 Ensinar formação</h3>
+    <p style="font-size:12.5px;color:#999;margin-top:-6px;">Monta no editor, na etapa atual, os jogadores exatamente como você desenharia essa situação de verdade (só quem está ativo na jogada + a bola). Depois escolhe qual situação é essa e salva.</p>
+    <select id="teachLabelSelect" style="width:100%;background:#111;border:1px solid #3a3a3a;color:#eee;padding:10px;border-radius:8px;margin-bottom:10px;">
+      ${SITUATION_POOL.map(s=>`<option value="${s.label}">${s.label}</option>`).join('')}
+    </select>
+    <div id="teachPreview" style="font-size:12.5px;color:#ccc;margin-bottom:8px;"></div>
+    <div class="modalBtnRow">
+      <button class="secondary" id="teachCancelBtn">Cancelar</button>
+      <button id="teachSaveBtn">Salvar como modelo</button>
+    </div>`);
+  const ball = entities.find(e=>e.team==='ball');
+  function updatePreview(){
+    if(!ball){ document.getElementById('teachPreview').textContent = 'Precisa ter uma bola em quadra.'; return; }
+    const sit = classifySituation(steps[currentStep].positions, ball.id);
+    document.getElementById('teachPreview').innerHTML = `O sistema está lendo essa etapa como: <b>${sit.label}</b> (${sit.nAtk} atacante(s) ativo(s) x ${sit.nDef} defensor(es) ativo(s))`;
+  }
+  updatePreview();
+  document.getElementById('teachCancelBtn').onclick = ()=> overlay.remove();
+  document.getElementById('teachSaveBtn').onclick = async ()=>{
+    if(!ball){ alert('Precisa ter uma bola em quadra pra ensinar uma formação.'); return; }
+    const label = document.getElementById('teachLabelSelect').value;
+    const positions = steps[currentStep].positions;
+    const active = computeActivePlayers(positions, ball.id);
+    if(active.activeBlue.length===0 || active.activeRed.length===0){
+      alert('Precisa ter pelo menos 1 atacante e 1 defensor ativos (perto da bola) nessa etapa.');
+      return;
+    }
+    // assume que o time azul já está atacando pra y menor (convenção do app)
+    const players = makeTemplateFromSituation(positions, ball.id, active.activeBlue, active.activeRed, true);
+    formationTemplates.push({label, players, source:'taught', createdAt:Date.now()});
+    await saveFormationTemplates();
+    overlay.remove();
+    const status = document.getElementById('status');
+    status.textContent = `✓ modelo de "${label}" salvo (${formationTemplates.filter(t=>t.label===label).length} no total)`;
+    setTimeout(()=>status.textContent='', 3000);
+  };
+};
+
+document.getElementById('extractFormationsBtn').onclick = async ()=>{
+  const status = document.getElementById('status');
+  status.textContent = 'analisando jogadas salvas...';
+  const index = await ensureMovementsIndex();
+  if(index.length===0){
+    status.textContent = '';
+    alert('Você ainda não tem jogadas salvas (nem importadas de vídeo) pra extrair formações. Salva ou importa algumas primeiro.');
+    return;
+  }
+  let extracted = 0;
+  const sample = index.slice(0, 60); // limite razoável pra não travar
+  for(const item of sample){
+    let mv;
+    try{ const r = await storageGet(item.key); if(!r||!r.value) continue; mv = JSON.parse(r.value); }catch(e){ continue; }
+    const ents = mv.entities || [], mvSteps = mv.steps || [];
+    const ball = ents.find(e=>e.team==='ball');
+    if(!ball) continue;
+    mvSteps.forEach(st=>{
+      const sit = classifySituation(st.positions, ball.id, ents);
+      const known = SITUATION_POOL.find(s=>s.label===sit.label);
+      if(!known) return; // pula "contra-ataque" e afins, só extrai composições NxM conhecidas
+      if(sit.active.activeBlue.length===0 || sit.active.activeRed.length===0) return;
+      const players = makeTemplateFromSituation(st.positions, ball.id, sit.active.activeBlue, sit.active.activeRed, true);
+      formationTemplates.push({label: sit.label, players, source:'extracted', createdAt:Date.now()});
+      extracted++;
+    });
+  }
+  await saveFormationTemplates();
+  status.textContent = `✓ ${extracted} formação(ões) extraída(s) de ${sample.length} jogada(s)`;
+  setTimeout(()=>status.textContent='', 4000);
+};
+
+// gera uma situação de treino usando um MODELO REAL (ensinado ou extraído),
+// não posição aleatória sem sentido. Ainda adiciona jogadores extras longe
+// da ação, pra treinar "estrutura", não "contagem" (seção 3).
 function generateTrainingSituation(){
-  const target = SITUATION_POOL[Math.floor(Math.random()*SITUATION_POOL.length)];
+  const availableLabels = [...new Set(formationTemplates.map(t=>t.label))];
+  if(availableLabels.length===0) return null; // sem nenhum modelo ainda
+
+  const label = availableLabels[Math.floor(Math.random()*availableLabels.length)];
+  const candidates = formationTemplates.filter(t=>t.label===label);
+  const template = candidates[Math.floor(Math.random()*candidates.length)];
 
   entities = []; steps = [{positions:{}}]; currentStep = 0;
   idCounter = 1; nextBlueNum = 1; nextRedNum = 1;
 
   const ballId = idCounter++;
   entities.push({id:ballId, team:'ball', number:'', name:''});
-  const actionX = 0.2 + Math.random()*0.6;
-  const actionY = 0.08 + Math.random()*0.35; // perto do gol que o time azul ataca (y menor)
+  const actionX = 0.25 + Math.random()*0.5;
+  const actionY = 0.1 + Math.random()*0.3;
+  const mirror = Math.random()<0.5 ? -1 : 1; // espelha esquerda/direita pra variar
+  const attackDown = Math.random()<0.5; // 50% ataca pra y menor, 50% pra y maior (espelha o modelo)
   steps[0].positions[ballId] = {x:actionX, y:actionY};
 
   const activeBlueIds = [];
-  for(let i=0;i<target.atk;i++){
+  template.players.forEach(tp=>{
     const id = idCounter++;
-    entities.push({id, team:'blue', number:nextBlueNum++, name:'', heightM:randomHeightM()});
-    const ang = Math.random()*Math.PI*2, dist = 0.03+Math.random()*0.13;
-    steps[0].positions[id] = {x:clamp01(actionX+Math.cos(ang)*dist), y:clamp01(actionY+Math.sin(ang)*dist*0.6), facingAngle:-Math.PI/2, customFacing:false};
-    activeBlueIds.push(id);
-  }
-  for(let i=0;i<target.def;i++){
-    const id = idCounter++;
-    entities.push({id, team:'red', number:nextRedNum++, name:'', heightM:randomHeightM()});
-    const ang = Math.random()*Math.PI*2, dist = 0.03+Math.random()*0.13;
-    steps[0].positions[id] = {x:clamp01(actionX+Math.cos(ang)*dist), y:clamp01(actionY+Math.sin(ang)*dist*0.6), facingAngle:Math.PI/2, customFacing:false};
-  }
-  // decoys: jogadores de verdade em quadra, mas fora do raio de ação —
-  // exatamente o que faz "contar bonecos" dar errado
+    const dy = attackDown ? tp.dy : -tp.dy;
+    const dx = tp.dx * mirror;
+    const pos = {x:clamp01(actionX+dx), y:clamp01(actionY+dy), facingAngle:(tp.team==='blue'?-Math.PI/2:Math.PI/2), customFacing:false};
+    if(tp.team==='blue'){
+      entities.push({id, team:'blue', number:nextBlueNum++, name:'', heightM:randomHeightM()});
+      activeBlueIds.push(id);
+    } else {
+      entities.push({id, team:'red', number:nextRedNum++, name:'', heightM:randomHeightM()});
+    }
+    steps[0].positions[id] = pos;
+  });
+
+  // decoys: jogadores de verdade em quadra, mas fora do raio de ação
   const extraBlue = Math.floor(Math.random()*3), extraRed = Math.floor(Math.random()*3);
   for(let i=0;i<extraBlue;i++){
     const id = idCounter++;
@@ -808,11 +928,10 @@ function generateTrainingSituation(){
   }
 
   recomputeAutoFacing(0);
-  // uma etapa seguinte com movimento leve, pra ter ação em vez de foto parada
   const copy = {};
   Object.keys(steps[0].positions).forEach(id=>{
     const p = steps[0].positions[id];
-    copy[id] = {...p, x:clamp01(p.x+(Math.random()-0.5)*0.07), y:clamp01(p.y+(Math.random()-0.5)*0.07)};
+    copy[id] = {...p, x:clamp01(p.x+(Math.random()-0.5)*0.05), y:clamp01(p.y+(Math.random()-0.5)*0.05)};
   });
   steps.push({positions:copy});
   recomputeAutoFacing(1);
@@ -2888,6 +3007,10 @@ async function saveTrainingStats(){
 
 document.getElementById('trainModeBtn').onclick = ()=>{
   const sit = generateTrainingSituation();
+  if(!sit){
+    alert('Ainda não tem nenhum modelo de formação salvo. Usa "🎓 Ensinar formação" (desenha você mesmo) ou "🔍 Extrair de jogadas" (puxa das suas jogadas salvas/importadas) antes de treinar.');
+    return;
+  }
   updateStepUI(); draw(); refreshPovSelect();
   document.getElementById('goto3D').click();
   setTimeout(()=> startTrainingRound(sit), 200);
@@ -2964,6 +3087,7 @@ document.getElementById('trainingAerialBtn').onclick = ()=>{
 };
 document.getElementById('trainingNextBtn').onclick = ()=>{
   const sit = generateTrainingSituation();
+  if(!sit){ document.getElementById('trainingExitBtn').click(); return; }
   updateStepUI(); draw(); refreshPovSelect();
   rebuild3DScene();
   startTrainingRound(sit);
