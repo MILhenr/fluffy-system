@@ -1083,9 +1083,16 @@ document.getElementById('importVideoInput').addEventListener('change', async (ev
       area.innerHTML = '<div id="processingMsg">Processando... isso pode levar de meio minuto a alguns minutos (sem placa de vídeo, roda mais devagar mesmo).</div><div style="width:100%;height:10px;background:#333;border-radius:6px;overflow:hidden;margin-top:8px;"><div id="processBar" style="height:100%;width:0%;background:#e0b84a;"></div></div>';
       const fd2 = new FormData();
       fd2.append('corners', JSON.stringify(points.map(p=>({x:p.x,y:p.y,fx:p.fx,fy:p.fy}))));
-      const procRes = await fetch(backendUrl + '/process/' + upData.job_id, {method:'POST', body:fd2});
+      let procRes;
+      try{
+        procRes = await fetch(backendUrl + '/process/' + upData.job_id, {method:'POST', body:fd2});
+      }catch(netErr){
+        area.innerHTML = `<span style="color:#ff6b6b;">Erro de rede ao chamar o backend: ${netErr.message}</span>`;
+        return;
+      }
       if(!procRes.ok){
-        area.innerHTML = '<span style="color:#ff6b6b;">Erro ao iniciar o processamento.</span>';
+        const bodyText = await procRes.text().catch(()=>'');
+        area.innerHTML = `<span style="color:#ff6b6b;">Erro ao iniciar o processamento (HTTP ${procRes.status}): ${bodyText}</span>`;
         return;
       }
       pollStatus();
