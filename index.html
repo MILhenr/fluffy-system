@@ -984,64 +984,105 @@ document.getElementById('importVideoInput').addEventListener('change', async (ev
     }
     const upData = await upRes.json();
 
-    // ---- marcar os 4 cantos da quadra no primeiro frame ----
+    // ---- marcar pontos conhecidos da quadra (não precisa ser os 4 cantos —
+    // qualquer combinação de referências visíveis serve, mínimo de 4) ----
+    const LANDMARKS = [
+      {label:'Canto do campo — gol A, esquerda', fx:0, fy:0},
+      {label:'Canto do campo — gol A, direita', fx:1, fy:0},
+      {label:'Canto do campo — gol B, esquerda', fx:0, fy:1},
+      {label:'Canto do campo — gol B, direita', fx:1, fy:1},
+      {label:'Trave esquerda do gol A', fx:0.435, fy:0},
+      {label:'Trave direita do gol A', fx:0.565, fy:0},
+      {label:'Trave esquerda do gol B', fx:0.435, fy:1},
+      {label:'Trave direita do gol B', fx:0.565, fy:1},
+      {label:'Centro do círculo central', fx:0.5, fy:0.5},
+      {label:'Lateral esquerda no meio da quadra', fx:0, fy:0.5},
+      {label:'Lateral direita no meio da quadra', fx:1, fy:0.5},
+      {label:'Marca do pênalti — lado do gol A', fx:0.5, fy:0.15},
+      {label:'Marca do pênalti — lado do gol B', fx:0.5, fy:0.85},
+      {label:'Lateral esquerda x início da área — gol A', fx:0, fy:0.15},
+      {label:'Lateral direita x início da área — gol A', fx:1, fy:0.15},
+      {label:'Lateral esquerda x início da área — gol B', fx:0, fy:0.85},
+      {label:'Lateral direita x início da área — gol B', fx:1, fy:0.85},
+    ];
     area.innerHTML = `
-      <div id="cornerStepLabel" style="margin-bottom:8px;">Toque no <b>1º canto</b>: perto de um gol, lado esquerdo</div>
+      <div id="cornerStepLabel" style="margin-bottom:8px;">Toque em qualquer ponto conhecido da quadra que apareça no vídeo (trave, marca de pênalti, círculo central...). Precisa de pelo menos <b>4 pontos</b>, quanto mais espalhados melhor.</div>
       <div style="position:relative;display:inline-block;max-width:100%;">
         <img id="cornerImg" src="data:image/jpeg;base64,${upData.first_frame_b64}" style="max-width:100%;display:block;border-radius:8px;">
         <canvas id="cornerCanvas" style="position:absolute;left:0;top:0;width:100%;height:100%;"></canvas>
+      </div>
+      <div id="cornerCount" style="margin-top:8px;font-size:12.5px;color:#999;">0 pontos marcados (mínimo 4)</div>
+      <div id="cornerActions" style="margin-top:8px;display:none;">
+        <button id="cornerConfirmBtn" style="background:#2c4270;border:1px solid #3d5a95;color:#fff;padding:9px 14px;border-radius:8px;">Confirmar e processar</button>
+        <button id="cornerUndoBtn" style="margin-left:6px;background:#2a2a2a;border:1px solid #444;color:#eee;padding:9px 14px;border-radius:8px;">Desfazer último</button>
       </div>`;
     const img = document.getElementById('cornerImg');
     const cnv = document.getElementById('cornerCanvas');
     const labelEl = document.getElementById('cornerStepLabel');
-    const cornerLabels = [
-      'Toque no <b>1º canto</b>: perto de um gol, lado esquerdo',
-      'Agora o <b>2º canto</b>: perto do MESMO gol, lado direito',
-      'Agora o <b>3º canto</b>: perto do OUTRO gol, lado direito',
-      'Por fim, o <b>4º canto</b>: perto do OUTRO gol, lado esquerdo'
-    ];
-    const corners = [];
+    const countEl = document.getElementById('cornerCount');
+    const actionsEl = document.getElementById('cornerActions');
+    const points = []; // {dx,dy,x,y,fx,fy,label}
     function syncCanvasSize(){
       cnv.width = img.clientWidth; cnv.height = img.clientHeight;
     }
-    function redrawCorners(){
+    function redrawPoints(){
       const ctx2 = cnv.getContext('2d');
       ctx2.clearRect(0,0,cnv.width,cnv.height);
-      ctx2.strokeStyle = '#e0b84a'; ctx2.lineWidth = 3;
-      corners.forEach((p,i)=>{
+      ctx2.strokeStyle = '#e0b84a'; ctx2.lineWidth = 2.5;
+      points.forEach((p,i)=>{
         ctx2.beginPath(); ctx2.arc(p.dx,p.dy,9,0,Math.PI*2); ctx2.fillStyle='#e0b84a'; ctx2.fill();
-        ctx2.fillStyle='#111'; ctx2.font='bold 13px sans-serif'; ctx2.textAlign='center'; ctx2.textBaseline='middle';
+        ctx2.fillStyle='#111'; ctx2.font='bold 12px sans-serif'; ctx2.textAlign='center'; ctx2.textBaseline='middle';
         ctx2.fillText(String(i+1), p.dx, p.dy);
       });
-      if(corners.length>1){
-        ctx2.beginPath();
-        corners.forEach((p,i)=> i===0?ctx2.moveTo(p.dx,p.dy):ctx2.lineTo(p.dx,p.dy));
-        if(corners.length===4) ctx2.closePath();
-        ctx2.stroke();
-      }
+      countEl.textContent = `${points.length} ponto(s) marcado(s) (mínimo 4)`;
+      actionsEl.style.display = points.length>=4 ? 'block' : 'none';
     }
     img.onload = syncCanvasSize;
     if(img.complete) syncCanvasSize();
+
+    function openLandmarkPicker(dx, dy, x, y){
+      const pickerId = 'landmarkPicker';
+      const old = document.getElementById(pickerId);
+      if(old) old.remove();
+      const box = document.createElement('div');
+      box.id = pickerId;
+      box.style.cssText = 'margin-top:8px;padding:10px;background:#111;border:1px solid #3a3a3a;border-radius:8px;';
+      box.innerHTML = `
+        <div style="font-size:12.5px;color:#ccc;margin-bottom:6px;">Esse ponto que você tocou é o quê?</div>
+        <select id="landmarkSelect" style="width:100%;background:#1c1c1c;border:1px solid #3a3a3a;color:#eee;padding:8px;border-radius:6px;font-size:13px;">
+          ${LANDMARKS.map((l,i)=>`<option value="${i}">${l.label}</option>`).join('')}
+        </select>
+        <div class="modalBtnRow" style="margin-top:8px;">
+          <button class="secondary" id="landmarkCancel">Cancelar</button>
+          <button id="landmarkOk">Marcar</button>
+        </div>`;
+      area.appendChild(box);
+      document.getElementById('landmarkCancel').onclick = ()=> box.remove();
+      document.getElementById('landmarkOk').onclick = ()=>{
+        const idx = parseInt(document.getElementById('landmarkSelect').value);
+        const lm = LANDMARKS[idx];
+        points.push({dx, dy, x, y, fx:lm.fx, fy:lm.fy, label:lm.label});
+        box.remove();
+        redrawPoints();
+      };
+    }
+
     cnv.addEventListener('click', (e)=>{
-      if(corners.length>=4) return;
       const rect = cnv.getBoundingClientRect();
       const dx = e.clientX-rect.left, dy = e.clientY-rect.top;
       const scaleX = img.naturalWidth/rect.width, scaleY = img.naturalHeight/rect.height;
-      corners.push({dx, dy, x: dx*scaleX, y: dy*scaleY});
-      redrawCorners();
-      if(corners.length<4){
-        labelEl.innerHTML = cornerLabels[corners.length];
-      } else {
-        labelEl.innerHTML = 'Prontinho! <button id="cornerConfirmBtn" style="margin-left:8px;background:#2c4270;border:1px solid #3d5a95;color:#fff;padding:8px 14px;border-radius:8px;">Confirmar e processar</button> <button id="cornerRedoBtn" style="margin-left:6px;background:#2a2a2a;border:1px solid #444;color:#eee;padding:8px 14px;border-radius:8px;">Refazer</button>';
-        document.getElementById('cornerConfirmBtn').onclick = ()=> submitCorners();
-        document.getElementById('cornerRedoBtn').onclick = ()=>{ corners.length=0; redrawCorners(); labelEl.innerHTML = cornerLabels[0]; };
-      }
+      openLandmarkPicker(dx, dy, dx*scaleX, dy*scaleY);
+    });
+    document.getElementById('cornerUndoBtn') && (document.getElementById('cornerUndoBtn').onclick = null);
+    area.addEventListener('click', (ev)=>{
+      if(ev.target && ev.target.id==='cornerUndoBtn'){ points.pop(); redrawPoints(); }
+      if(ev.target && ev.target.id==='cornerConfirmBtn'){ submitCorners(); }
     });
 
     async function submitCorners(){
       area.innerHTML = '<div id="processingMsg">Processando... isso pode levar de meio minuto a alguns minutos (sem placa de vídeo, roda mais devagar mesmo).</div><div style="width:100%;height:10px;background:#333;border-radius:6px;overflow:hidden;margin-top:8px;"><div id="processBar" style="height:100%;width:0%;background:#e0b84a;"></div></div>';
       const fd2 = new FormData();
-      fd2.append('corners', JSON.stringify(corners.map(c=>({x:c.x,y:c.y}))));
+      fd2.append('corners', JSON.stringify(points.map(p=>({x:p.x,y:p.y,fx:p.fx,fy:p.fy}))));
       const procRes = await fetch(backendUrl + '/process/' + upData.job_id, {method:'POST', body:fd2});
       if(!procRes.ok){
         area.innerHTML = '<span style="color:#ff6b6b;">Erro ao iniciar o processamento.</span>';
