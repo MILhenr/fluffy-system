@@ -775,7 +775,7 @@ function computeActivePlayers(positions, ballId, entitiesList){
   const out = {activeBlue:[], activeRed:[], inactiveBlue:[], inactiveRed:[]};
   if(!ballPos) return out;
   entitiesList.forEach(e=>{
-    if(e.team==='ball') return;
+    if(e.team==='ball' || e.isGoalkeeper) return;
     const p = positions[e.id];
     if(!p) return;
     const dx = (p.x-ballPos.x)*COURT_WID, dy = (p.y-ballPos.y)*COURT_LEN;
@@ -942,6 +942,8 @@ function generateTrainingSituation(){
   entities = []; steps = [{positions:{}}]; currentStep = 0;
   idCounter = 1; nextBlueNum = 1; nextRedNum = 1;
 
+  const MAX_LINE = 4; // 4 de linha + 1 goleiro = 5 no total, por time — nunca mais que isso
+
   const ballId = idCounter++;
   entities.push({id:ballId, team:'ball', number:'', name:''});
   // numeridade (3x2, 3x1 etc) só acontece no campo adversário, no meio de
@@ -957,12 +959,16 @@ function generateTrainingSituation(){
   const mirror = Math.random()<0.5 ? -1 : 1; // espelha só esquerda/direita, nunca o lado do ataque
   steps[0].positions[ballId] = {x:actionX, y:actionY};
 
+  // separa os jogadores do modelo por time, e trunca em no máximo 4 de linha
+  // por time — nunca deixa passar disso, seja lá o que o modelo tiver
+  const bluePlayers = template.players.filter(tp=>tp.team==='blue').slice(0, MAX_LINE);
+  const redPlayers = template.players.filter(tp=>tp.team==='red').slice(0, MAX_LINE);
+
   const activeBlueIds = [];
-  template.players.forEach(tp=>{
+  function placeTemplatePlayer(tp){
     const id = idCounter++;
-    const dy = tp.dy;
     const dx = tp.dx * mirror;
-    const pos = {x:clamp01(actionX+dx), y:clamp01(actionY+dy), facingAngle:(tp.team==='blue'?-Math.PI/2:Math.PI/2), customFacing:false};
+    const pos = {x:clamp01(actionX+dx), y:clamp01(actionY+tp.dy), facingAngle:(tp.team==='blue'?-Math.PI/2:Math.PI/2), customFacing:false};
     if(tp.team==='blue'){
       entities.push({id, team:'blue', number:nextBlueNum++, name:'', heightM:randomHeightM()});
       activeBlueIds.push(id);
@@ -970,10 +976,15 @@ function generateTrainingSituation(){
       entities.push({id, team:'red', number:nextRedNum++, name:'', heightM:randomHeightM()});
     }
     steps[0].positions[id] = pos;
-  });
+  }
+  bluePlayers.forEach(placeTemplatePlayer);
+  redPlayers.forEach(placeTemplatePlayer);
 
-  // decoys: jogadores de verdade em quadra, mas fora do raio de ação
-  const extraBlue = Math.floor(Math.random()*3), extraRed = Math.floor(Math.random()*3);
+  // decoys: só preenchem o que sobrar até 4 de linha por time — nunca estoura
+  const extraBlueSlots = Math.max(0, MAX_LINE - bluePlayers.length);
+  const extraRedSlots = Math.max(0, MAX_LINE - redPlayers.length);
+  const extraBlue = Math.floor(Math.random()*(extraBlueSlots+1));
+  const extraRed = Math.floor(Math.random()*(extraRedSlots+1));
   for(let i=0;i<extraBlue;i++){
     const id = idCounter++;
     entities.push({id, team:'blue', number:nextBlueNum++, name:'', heightM:randomHeightM()});
@@ -984,6 +995,15 @@ function generateTrainingSituation(){
     entities.push({id, team:'red', number:nextRedNum++, name:'', heightM:randomHeightM()});
     steps[0].positions[id] = {x:clamp01(Math.random()), y:clamp01(0.55+Math.random()*0.4), facingAngle:Math.PI/2, customFacing:false};
   }
+
+  // o goleiro é sempre parte fixa do elenco — travado na própria área, do
+  // jeito que já funciona no editor manual
+  const gkBlueId = idCounter++;
+  entities.push({id:gkBlueId, team:'blue', number:nextBlueNum++, name:'Goleiro', heightM:randomHeightM(), isGoalkeeper:true});
+  steps[0].positions[gkBlueId] = {x:0.5, y:0.94, facingAngle:-Math.PI/2, customFacing:false};
+  const gkRedId = idCounter++;
+  entities.push({id:gkRedId, team:'red', number:nextRedNum++, name:'Goleiro', heightM:randomHeightM(), isGoalkeeper:true});
+  steps[0].positions[gkRedId] = {x:0.5, y:0.06, facingAngle:Math.PI/2, customFacing:false};
 
   recomputeAutoFacing(0);
   const copy = {};
