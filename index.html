@@ -790,19 +790,36 @@ function classifySituation(positions, ballId, entitiesList){
   const active = computeActivePlayers(positions, ballId, entitiesList);
   const ballPos = positions[ballId];
   const nAtk = active.activeBlue.length, nDef = active.activeRed.length;
-  let label = `${nAtk}x${nDef}`;
+  let label;
   if(nDef===0 && nAtk>=1) label = 'contra-ataque';
+  else if(nAtk>nDef && nDef>=1) label = 'Maioridade numérica'; // 2x1, 3x1, 3x2, 4x3... tudo isso é a mesma leitura tática
+  else label = `${nAtk}x${nDef}`;
   const ballSide = !ballPos ? 'centro' : (ballPos.x<0.4?'esquerda':(ballPos.x>0.6?'direita':'centro'));
   const zone = !ballPos ? 'meio' : (ballPos.y<0.15?'bola no fundo':(ballPos.y<0.35?'ataque':'meio de quadra'));
   return {label, nAtk, nDef, ballSide, zone, active};
 }
 
-// composições NxM conhecidas — usadas tanto pra classificar quanto pra
-// escolher o que sortear no treino
+// composições reconhecíveis por número: números iguais continuam distintos
+// (1x1, 2x2...), mas qualquer vantagem numérica vira um pacote só —
+// "Maioridade numérica" — porque a leitura tática é a mesma (abrir o jogo)
 const SITUATION_POOL = [
-  {label:'1x1'}, {label:'2x1'}, {label:'2x2'},
-  {label:'3x2'}, {label:'3x3'}, {label:'4x3'}, {label:'4x4'},
+  {label:'1x1'}, {label:'2x2'}, {label:'3x3'}, {label:'4x4'},
+  {label:'Maioridade numérica'},
 ];
+// fases do jogo — categorias que não dependem de contagem, e sim de contexto
+// (pressão, profundidade). Lista aberta: dá pra adicionar mais aqui depois.
+// Não têm detecção automática (isso exige leitura tática que só você tem) —
+// só existem através de "Ensinar formação" ou extraídas das suas jogadas.
+const PHASE_POOL = [
+  {label:'Ataque profundo', yRange:[0.03, 0.25]},   // time todo lá na frente, atacando
+  {label:'Ataque sem pressão', yRange:[0.1, 0.5]},  // construindo sem marcação alta do adversário
+  {label:'Saída de pressão', yRange:[0.62, 0.95]},  // adversário pressionando alto, nós saindo lá de trás
+];
+const ALL_TRAINABLE_LABELS = [...SITUATION_POOL.map(s=>s.label), ...PHASE_POOL.map(p=>p.label)];
+function actionYRangeForLabel(label){
+  const phase = PHASE_POOL.find(p=>p.label===label);
+  return phase ? phase.yRange : [0.05, 0.6]; // maioridade numérica e NxN: campo adversário até um pouco depois do meio
+}
 
 // ---------------------------------------------------------------------------
 // BIBLIOTECA DE MODELOS DE FORMAÇÃO — cada modelo guarda as posições
@@ -844,7 +861,7 @@ document.getElementById('teachFormationBtn').onclick = ()=>{
     <h3>🎓 Ensinar formação</h3>
     <p style="font-size:12.5px;color:#999;margin-top:-6px;">Monta no editor, na etapa atual, os jogadores exatamente como você desenharia essa situação de verdade (só quem está ativo na jogada + a bola). Depois escolhe qual situação é essa e salva.</p>
     <select id="teachLabelSelect" style="width:100%;background:#111;border:1px solid #3a3a3a;color:#eee;padding:10px;border-radius:8px;margin-bottom:10px;">
-      ${SITUATION_POOL.map(s=>`<option value="${s.label}">${s.label}</option>`).join('')}
+      ${ALL_TRAINABLE_LABELS.map(l=>`<option value="${l}">${l}</option>`).join('')}
     </select>
     <div id="teachPreview" style="font-size:12.5px;color:#ccc;margin-bottom:8px;"></div>
     <div class="modalBtnRow">
@@ -931,8 +948,12 @@ function generateTrainingSituation(){
   // quadra, ou um pouco atrás do meio (transição) — nunca lá no fundo da
   // própria defesa. O azul SEMPRE ataca pra y=0 (mesma convenção usada em
   // toda a aplicação: câmera, goleiro, marcação) — nunca inverte o lado.
+  // cada rótulo tem sua zona certa: maioridade numérica e NxN ficam no campo
+  // adversário até um pouco depois do meio; "Saída de pressão" fica lá atrás,
+  // no próprio campo; "Ataque profundo" fica bem avançado — ver actionYRangeForLabel
+  const [yMin, yMax] = actionYRangeForLabel(label);
   const actionX = 0.25 + Math.random()*0.5;
-  const actionY = 0.05 + Math.random()*0.55; // até um pouco depois do meio (0.5), nunca mais fundo que isso
+  const actionY = yMin + Math.random()*(yMax-yMin);
   const mirror = Math.random()<0.5 ? -1 : 1; // espelha só esquerda/direita, nunca o lado do ataque
   steps[0].positions[ballId] = {x:actionX, y:actionY};
 
@@ -3082,7 +3103,7 @@ function checkTrainingPause(){
 }
 
 function showSituationQuiz(){
-  const allLabels = ['1x1','2x1','2x2','3x2','3x3','4x3','4x4','contra-ataque'];
+  const allLabels = [...ALL_TRAINABLE_LABELS, 'contra-ataque'];
   let choices = allLabels.filter(l=>l!==trainingCurrent.label).sort(()=>Math.random()-0.5).slice(0,4);
   choices.push(trainingCurrent.label);
   choices.sort(()=>Math.random()-0.5);
