@@ -3151,19 +3151,37 @@ function exitReviewCamera(){
     three.hiddenForReview = null;
   }
 }
-document.getElementById('trainingAerialBtn').onclick = ()=>{
-  enterReviewCamera();
-  three.camera.position.set(0, 26, 0.001);
-  three.camera.up.set(0, 0, -1);
+function setAerialCamera(){
+  // altura calculada pra caber a quadra INTEIRA (comprimento e largura) na
+  // tela, com folga — e alinhando o comprimento (gol a gol) com o lado
+  // comprido da tela do celular (retrato), não o lado estreito
+  const aspect = (three.camera.aspect) || 0.5;
+  const vFov = three.camera.fov * Math.PI/180;
+  const halfV = vFov/2;
+  const halfH = Math.atan(Math.tan(halfV)*aspect);
+  const hForLen = (COURT_LEN/2) / Math.tan(halfV);
+  const hForWid = (COURT_WID/2) / Math.tan(halfH);
+  const h = Math.max(hForLen, hForWid) * 1.3; // 30% de folga
+  three.camera.position.set(0, h, 0.001);
+  three.camera.up.set(1, 0, 0); // comprimento da quadra alinhado com o lado comprido da tela
   three.camera.lookAt(0, 0, 0);
-};
-document.getElementById('trainingBroadcastBtn').onclick = ()=>{
-  enterReviewCamera();
-  // câmera elevada de lado, tipo transmissão de tv vista da arquibancada
-  three.camera.position.set(0, 15, COURT_WID/2 + 15);
+}
+function setBroadcastCamera(){
+  const aspect = (three.camera.aspect) || 0.5;
+  const vFov = three.camera.fov * Math.PI/180;
+  const halfV = vFov/2;
+  const halfH = Math.atan(Math.tan(halfV)*aspect);
+  const hForLen = (COURT_LEN/2) / Math.tan(halfV);
+  const hForWid = (COURT_WID/2) / Math.tan(halfH);
+  const dist = Math.max(hForLen, hForWid) * 1.35;
+  // câmera elevada de lado, tipo transmissão de tv vista da arquibancada —
+  // longe/alta o suficiente pra pegar a quadra inteira, de um gol até o outro
+  three.camera.position.set(0, dist*0.55, dist*0.95);
   three.camera.up.set(0, 1, 0);
-  three.camera.lookAt(0, 1, 0);
-};
+  three.camera.lookAt(0, 0, 0);
+}
+document.getElementById('trainingAerialBtn').onclick = ()=>{ enterReviewCamera(); setAerialCamera(); };
+document.getElementById('trainingBroadcastBtn').onclick = ()=>{ enterReviewCamera(); setBroadcastCamera(); };
 
 // ---- botões de câmera sempre disponíveis, em qualquer modo (não só depois
 // de responder o quiz de reconhecimento) ----
@@ -3180,17 +3198,13 @@ document.getElementById('camFpBtn').onclick = ()=>{
 document.getElementById('camAerialBtn').onclick = ()=>{
   if(!three) return;
   enterReviewCamera();
-  three.camera.position.set(0, 26, 0.001);
-  three.camera.up.set(0, 0, -1);
-  three.camera.lookAt(0, 0, 0);
+  setAerialCamera();
   setActiveCamBtn('camAerialBtn');
 };
 document.getElementById('camBroadcastBtn').onclick = ()=>{
   if(!three) return;
   enterReviewCamera();
-  three.camera.position.set(0, 15, COURT_WID/2 + 15);
-  three.camera.up.set(0, 1, 0);
-  three.camera.lookAt(0, 1, 0);
+  setBroadcastCamera();
   setActiveCamBtn('camBroadcastBtn');
 };
 
