@@ -76,6 +76,7 @@
       <div class="sep"></div>
       <button id="saveMovementBtn" class="iconbtn primary"><span class="ic">🏃</span>Salvar jogada</button>
       <button id="loadMovementBtn" class="iconbtn"><span class="ic">📂</span>Jogadas</button>
+      <button id="playlistBtn" class="iconbtn primary"><span class="ic">🎬</span>Playlist</button>
       <button id="importBtn" class="iconbtn"><span class="ic">📥</span>Importar</button>
       <input type="file" id="importInput" accept="application/json" style="display:none">
       <button id="importVideoBtn" class="iconbtn primary"><span class="ic">🎥</span>Importar de vídeo</button>
@@ -101,6 +102,7 @@
       <button id="pivotPassStepBtn" class="txt" style="display:none;">🎯 Passe pivô</button>
       <button id="clearSteps" class="iconbtn warn" style="width:44px;height:44px;flex-shrink:0;" title="Limpar etapas"><span class="ic" style="font-size:16px;">🧹</span></button>
       <button id="clearAll" class="iconbtn warn" style="width:44px;height:44px;flex-shrink:0;" title="Nova prancha"><span class="ic" style="font-size:16px;">🗂️</span></button>
+      <button id="mirrorPlayBtn" class="iconbtn" title="Espelhar jogada (esquerda/direita)"><span class="ic">🪞</span>Espelhar</button>
     </div>
 
     <div id="stage">
@@ -1197,6 +1199,146 @@ function applyImportedPlay(data){
   updateStepUI(); draw(); refreshPovSelect();
 }
 
+document.getElementById('playlistBtn').onclick = async ()=>{
+  const index = await ensureMovementsIndex();
+  const seq = [];
+  const overlay = openModal(`
+    <h3>🎬 Playlist de jogadas</h3>
+    <div style="font-size:12.5px;color:#999;margin-bottom:8px;">Monta uma sequência com suas jogadas salvas — pode repetir a mesma jogada quantas vezes quiser.</div>
+    <div id="plAvailable" style="max-height:150px;overflow-y:auto;margin-bottom:10px;"></div>
+    <div style="font-size:12.5px;color:#ccc;margin-bottom:4px;">Sequência:</div>
+    <div id="plSequence" style="max-height:170px;overflow-y:auto;margin-bottom:10px;"></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#ddd;margin-bottom:10px;">
+      <input type="checkbox" id="plQuizMode" style="width:auto;"> Modo quiz — depois de cada jogada, pergunta qual foi
+    </label>
+    <div class="modalBtnRow">
+      <button class="secondary" id="plCloseBtn">Fechar</button>
+      <button id="plPlayBtn">▶ Reproduzir</button>
+    </div>`);
+  function renderAvailable(){
+    const el = document.getElementById('plAvailable');
+    if(index.length===0){ el.innerHTML = '<div style="color:#999;font-size:12.5px;">Nenhuma jogada salva ainda.</div>'; return; }
+    el.innerHTML = index.map((item,i)=>`<button class="plAddBtn" data-i="${i}" style="display:block;width:100%;text-align:left;margin-bottom:6px;background:#2c4270;border:1px solid #3d5a95;color:#fff;padding:9px 10px;border-radius:8px;font-size:13px;">+ ${item.name}</button>`).join('');
+    el.querySelectorAll('.plAddBtn').forEach(btn=>{
+      btn.onclick = ()=>{
+        const item = index[parseInt(btn.dataset.i)];
+        seq.push({key:item.key, name:item.name});
+        renderSequence();
+      };
+    });
+  }
+  function renderSequence(){
+    const el = document.getElementById('plSequence');
+    if(seq.length===0){ el.innerHTML = '<div style="color:#999;font-size:12.5px;">Vazia — adiciona jogadas acima (pode repetir).</div>'; return; }
+    el.innerHTML = seq.map((s,i)=>`<div class="movementItem"><span class="mname">${i+1}. ${s.name}</span><button class="del" data-i="${i}">🗑</button></div>`).join('');
+    el.querySelectorAll('.del').forEach(btn=>{
+      btn.onclick = ()=>{ seq.splice(parseInt(btn.dataset.i),1); renderSequence(); };
+    });
+  }
+  renderAvailable(); renderSequence();
+  document.getElementById('plCloseBtn').onclick = ()=> overlay.remove();
+  document.getElementById('plPlayBtn').onclick = ()=>{
+    if(seq.length===0){ alert('Adiciona pelo menos uma jogada na sequência.'); return; }
+    const quizMode = document.getElementById('plQuizMode').checked;
+    overlay.remove();
+    startPlaylist(seq.slice(), quizMode);
+  };
+};
+
+async function loadMovementByKey(key){
+  try{
+    const r = await storageGet(key);
+    if(!r || !r.value) return null;
+    return JSON.parse(r.value);
+  }catch(e){ return null; }
+}
+let playlistState = null;
+function startPlaylist(seq, quizMode){
+  trainingCurrent = null; // não deixa o quiz de "Reconhecimento" disparar por engano junto
+  playlistState = {seq, quizMode, pos:0};
+  playPlaylistEntry();
+}
+async function playPlaylistEntry(){
+  if(!playlistState) return;
+  const entry = playlistState.seq[playlistState.pos];
+  const data = await loadMovementByKey(entry.key);
+  if(!data){ playlistState.pos = (playlistState.pos+1) % playlistState.seq.length; playPlaylistEntry(); return; }
+  applyImportedPlay(data);
+  if(document.getElementById('viewer3D').style.display==='none'){
+    document.getElementById('goto3D').click();
+  } else if(three){
+    rebuild3DScene();
+    three.t = 0; three.playing = true; three.transition = null;
+    three.triggeredPivotSteps = new Set();
+  }
+  const badge = document.getElementById('viewer3DModeBadge');
+  if(badge) badge.textContent = `PLAYLIST ${playlistState.pos+1}/${playlistState.seq.length}`;
+}
+function advancePlaylist(){
+  if(!playlistState) return;
+  if(playlistState.quizMode){
+    showPlaylistQuiz();
+    return;
+  }
+  playlistState.pos = (playlistState.pos+1) % playlistState.seq.length;
+  playPlaylistEntry();
+}
+function showPlaylistQuiz(){
+  three.playing = false;
+  const correctName = playlistState.seq[playlistState.pos].name;
+  const distinctNames = [...new Set(playlistState.seq.map(s=>s.name))];
+  let choices = distinctNames.filter(n=>n!==correctName).sort(()=>Math.random()-0.5).slice(0,4);
+  choices.push(correctName);
+  choices.sort(()=>Math.random()-0.5);
+  const list = document.getElementById('trainingChoices');
+  list.innerHTML = '';
+  document.getElementById('trainingQuestion').textContent = 'Qual jogada foi essa?';
+  document.getElementById('trainingResult').textContent = '';
+  document.getElementById('trainingNextBtn').style.display = 'none';
+  document.getElementById('trainingAerialBtn').style.display = 'none';
+  document.getElementById('trainingBroadcastBtn').style.display = 'none';
+  choices.forEach(c=>{
+    const btn = document.createElement('button');
+    btn.className = 'trainChoiceBtn';
+    btn.style.cssText = 'padding:12px 16px;background:#2c4270;border:1px solid #3d5a95;color:#fff;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;';
+    btn.textContent = c;
+    btn.onclick = ()=> answerPlaylistQuiz(c, correctName);
+    list.appendChild(btn);
+  });
+  document.getElementById('trainingOverlay').style.display = 'flex';
+}
+function answerPlaylistQuiz(answer, correctName){
+  document.querySelectorAll('.trainChoiceBtn').forEach(b=>{
+    b.disabled = true;
+    if(b.textContent===correctName) b.style.background = '#2c7a3f';
+    else if(b.textContent===answer) b.style.background = '#7a2c2c';
+  });
+  const correct = answer===correctName;
+  document.getElementById('trainingResult').innerHTML = correct ? `✅ Isso! Era "${correctName}"` : `❌ Era "${correctName}" — você respondeu "${answer}"`;
+  document.getElementById('trainingResult').style.color = correct ? '#4ade80' : '#ff6b6b';
+  document.getElementById('trainingNextBtn').style.display = 'inline-block';
+  document.getElementById('trainingNextBtn').textContent = 'Próxima jogada →';
+  document.getElementById('trainingNextBtn').onclick = ()=>{
+    document.getElementById('trainingOverlay').style.display = 'none';
+    document.getElementById('trainingNextBtn').textContent = 'Próxima situação →';
+    playlistState.pos = (playlistState.pos+1) % playlistState.seq.length;
+    playPlaylistEntry();
+  };
+}
+
+
+document.getElementById('mirrorPlayBtn').onclick = ()=>{
+  steps.forEach(st=>{
+    Object.values(st.positions).forEach(p=>{
+      p.x = 1 - p.x;
+      if(p.facingAngle!=null) p.facingAngle = Math.PI - p.facingAngle;
+    });
+  });
+  draw();
+  const status = document.getElementById('status');
+  status.textContent = '✓ jogada espelhada';
+  setTimeout(()=>status.textContent='', 2000);
+};
 document.getElementById('importInput').addEventListener('change', (ev)=>{
   const file = ev.target.files[0];
   if(!file) return;
@@ -2484,6 +2626,10 @@ function animate3D(){
         if(three.isRecording){
           three.t = dur;
           stopRecordingManual();
+        } else if(playlistState){
+          three.t = dur;
+          advancePlaylist();
+          return;
         } else {
           // repete sozinho em loop, sem precisar voltar e clicar de novo
           three.t = 0;
@@ -2906,6 +3052,7 @@ document.getElementById('goto3D').onclick = ()=>{
 document.getElementById('backTo2D').onclick = ()=>{
   three.playing = false;
   three.controlMode = false;
+  playlistState = null;
   document.getElementById('controlPad').style.display = 'none';
   document.getElementById('controlModeBtn').textContent = '🎮 Controlar';
   if(three.povId!=null) selectedId = three.povId;
@@ -2915,6 +3062,7 @@ document.getElementById('backTo2D').onclick = ()=>{
   layoutCanvas();
 };
 document.getElementById('controlModeBtn').onclick = ()=>{
+  playlistState = null;
   exitReviewCamera();
   setActiveCamBtn('camFpBtn');
   three.controlMode = !three.controlMode;
