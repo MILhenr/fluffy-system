@@ -102,7 +102,8 @@
       <button id="pivotPassStepBtn" class="txt" style="display:none;">🎯 Passe pivô</button>
       <button id="clearSteps" class="iconbtn warn" style="width:44px;height:44px;flex-shrink:0;" title="Limpar etapas"><span class="ic" style="font-size:16px;">🧹</span></button>
       <button id="clearAll" class="iconbtn warn" style="width:44px;height:44px;flex-shrink:0;" title="Nova prancha"><span class="ic" style="font-size:16px;">🗂️</span></button>
-      <button id="mirrorPlayBtn" class="iconbtn" title="Espelhar jogada (esquerda/direita)"><span class="ic">🪞</span>Espelhar</button>
+      <button id="mirrorPlayBtn" class="iconbtn" title="Espelhar jogada (esquerda/direita)"><span class="ic">🪞</span>Espelhar ↔</button>
+      <button id="mirrorPlayVBtn" class="iconbtn" title="Espelhar jogada (cima/baixo)"><span class="ic">🔃</span>Espelhar ↕</button>
     </div>
 
     <div id="stage">
@@ -1336,7 +1337,19 @@ document.getElementById('mirrorPlayBtn').onclick = ()=>{
   });
   draw();
   const status = document.getElementById('status');
-  status.textContent = '✓ jogada espelhada';
+  status.textContent = '✓ jogada espelhada (esquerda/direita)';
+  setTimeout(()=>status.textContent='', 2000);
+};
+document.getElementById('mirrorPlayVBtn').onclick = ()=>{
+  steps.forEach(st=>{
+    Object.values(st.positions).forEach(p=>{
+      p.y = 1 - p.y;
+      if(p.facingAngle!=null) p.facingAngle = -p.facingAngle;
+    });
+  });
+  draw();
+  const status = document.getElementById('status');
+  status.textContent = '✓ jogada espelhada (cima/baixo)';
   setTimeout(()=>status.textContent='', 2000);
 };
 document.getElementById('importInput').addEventListener('change', (ev)=>{
