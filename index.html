@@ -1896,7 +1896,12 @@ async function ensureMovementsIndex(){
 document.getElementById('saveMovementBtn').onclick = ()=>{
   const overlay = openModal(`
     <h3>Salvar jogada</h3>
-    <input type="text" id="movementNameInput" placeholder="Nome da jogada (ex: Contra-ataque 1)">
+    <input type="text" id="movementNameInput" placeholder="Nome da jogada (ex: Saída de pressão - ala fixo pivô)">
+    <select id="movementTagSelect" style="width:100%;background:#111;border:1px solid #3a3a3a;color:#eee;padding:10px;border-radius:8px;margin-top:8px;">
+      <option value="">Sem etiqueta de situação</option>
+      ${ALL_TRAINABLE_LABELS.map(l=>`<option value="${l}">${l}</option>`).join('')}
+    </select>
+    <p style="font-size:12px;color:#999;margin:6px 0 0;">Marcar a situação (ex: "Saída de pressão") faz a IA reproduzir essa coreografia sozinha, de verdade, quando essa situação acontecer no jogo.</p>
     <div class="modalBtnRow">
       <button class="secondary" id="movementCancelBtn">Cancelar</button>
       <button id="movementConfirmBtn">Salvar</button>
@@ -1906,15 +1911,16 @@ document.getElementById('saveMovementBtn').onclick = ()=>{
   document.getElementById('movementConfirmBtn').onclick = async ()=>{
     const nameInput = document.getElementById('movementNameInput').value.trim();
     const name = nameInput || `Jogada ${new Date().toLocaleString('pt-BR')}`;
+    const situationTag = document.getElementById('movementTagSelect').value || null;
     const key = 'movement_'+Date.now();
     const savedAt = Date.now();
-    const data = JSON.stringify({name, entities, steps, nextBlueNum, nextRedNum, savedAt});
+    const data = JSON.stringify({name, entities, steps, nextBlueNum, nextRedNum, savedAt, situationTag});
     const btn = document.getElementById('movementConfirmBtn');
     btn.textContent = 'Salvando...'; btn.disabled = true;
     try{
       await storageSet(key, data);
       const index = await ensureMovementsIndex();
-      index.push({key, name, savedAt, stepCount: steps.length});
+      index.push({key, name, savedAt, stepCount: steps.length, situationTag});
       await saveMovementsIndex(index);
       overlay.remove();
       const status = document.getElementById('status');
@@ -2810,13 +2816,186 @@ function entityWorldPos(id){
 
 // companheiros sem bola: correm pra apoiar (avançam um pouco à frente de
 // quem tá com a bola, mantendo a própria faixa de largura)
+// ---------------------------------------------------------------------------
+// CATÁLOGO DE REGRAS DE COMPORTAMENTO DEFENSIVO — regras específicas de
+// futsal, descritas em português por você e traduzidas em lógica. Cada regra
+// nova que você descrever entra aqui do mesmo jeito. Regras atuais:
+//
+// 1. "1x1 na ala": o marcador isolado (sem ajuda perto) nunca desarma no
+//    susto — ele contém a jogada a uma distância segura e só aperta de
+//    verdade quando precisa, em vez de tentar roubar a bola e arriscar ser
+//    driblado.
+// 2. "Goleiro com a bola": ninguém do time que está pressionando avança
+//    forte quando o goleiro adversário está com a bola — o risco é levar um
+//    passe nas costas da marcação.
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// JOGADAS ENSAIADAS DE VERDADE — quando você salva uma jogada com etiqueta de
+// situação (ex: "Saída de pressão"), a IA reconhece a hora certa (bola no
+// campo/zona certa, seu time com a bola) e reproduz a coreografia exata que
+// você desenhou — quem passa pra quem, quem se movimenta pra onde — em vez
+// de improvisar com a lógica genérica.
+// ---------------------------------------------------------------------------
+async function loadScriptedPlays(){
+  three.scriptedPlays = {};
+  try{
+    const index = await ensureMovementsIndex();
+    const tagged = index.filter(item=>item.situationTag);
+    for(const item of tagged){
+      const r = await storageGet(item.key);
+      if(!r || !r.value) continue;
+      const data = JSON.parse(r.value);
+      if(!data.situationTag || !data.steps || data.steps.length<2) continue;
+      three.scriptedPlays[data.situationTag] = three.scriptedPlays[data.situationTag] || [];
+      three.scriptedPlays[data.situationTag].push(data);
+    }
+  }catch(e){ console.error('erro carregando jogadas ensaiadas:', e); }
+}
+function ballHolderInSavedStep(play, stepIdx){
+  const ballEnt = play.entities.find(e=>e.team==='ball');
+  if(!ballEnt) return null;
+  const bp = play.steps[stepIdx].positions[ballEnt.id];
+  if(!bp) return null;
+  let bestId=null, bestDist=Infinity;
+  play.entities.forEach(e=>{
+    if(e.team==='ball') return;
+    const p = play.steps[stepIdx].positions[e.id];
+    if(!p) return;
+    const d = Math.hypot(p.x-bp.x, p.y-bp.y);
+    if(d<bestDist){ bestDist=d; bestId=e.id; }
+  });
+  return bestId;
+}
+function checkScriptedPlayTrigger(){
+  if(three.scriptedExec || !three.scriptedPlays || !three.manualBallPos || three.passAnim) return;
+  const holder = getBallHolderEntity();
+  if(!holder || holder.team!=='blue') return; // reproduz a coreografia quando é SEU time com a bola
+  const bfy = three.manualBallPos.x/COURT_LEN + 0.5;
+  for(const tag in three.scriptedPlays){
+    const [yMin,yMax] = actionYRangeForLabel(tag);
+    if(bfy>=yMin && bfy<=yMax){
+      const options = three.scriptedPlays[tag];
+      const play = options[Math.floor(Math.random()*options.length)];
+      startScriptedPlay(play);
+      return;
+    }
+  }
+}
+function startScriptedPlay(play){
+  const savedBlue = play.entities.filter(e=>e.team==='blue');
+  const liveBlue = three.snap.entities.filter(e=>e.team==='blue' && !e.isGoalkeeper);
+  const mapping = {};
+  const usedLive = new Set();
+  savedBlue.forEach(se=>{
+    const sp0 = play.steps[0].positions[se.id];
+    if(!sp0) return;
+    const sw = toWorld(sp0.x, sp0.y);
+    let bestId=null, bestDist=Infinity;
+    liveBlue.forEach(le=>{
+      if(usedLive.has(le.id)) return;
+      const lp = entityWorldPos(le.id);
+      if(!lp) return;
+      const d = lp.distanceTo(sw);
+      if(d<bestDist){ bestDist=d; bestId=le.id; }
+    });
+    if(bestId!=null){ mapping[se.id]=bestId; usedLive.add(bestId); }
+  });
+  three.scriptedExec = {play, mapping, stepIdx:0, stepStart:performance.now(), stepDuration:1300};
+}
+function scriptedLiveIds(){
+  return three.scriptedExec ? Object.values(three.scriptedExec.mapping) : [];
+}
+function updateScriptedExec(dt){
+  const ex = three.scriptedExec;
+  if(!ex) return;
+  // se um vermelho ganhou a bola no meio do caminho, a coreografia perde o
+  // sentido — aborta e devolve o controle pra IA genérica
+  if(three.manualBallPos){
+    const holder = getBallHolderEntity();
+    if(holder && holder.team==='red'){ three.scriptedExec = null; return; }
+  }
+  const curStep = ex.play.steps[ex.stepIdx];
+  Object.entries(ex.mapping).forEach(([savedId, liveId])=>{
+    if(liveId===three.povId) return; // o jogador que você controla, você decide — não força
+    const sp = curStep.positions[savedId];
+    const fp = three.frozenPositions[liveId];
+    if(!sp || !fp) return;
+    const targetW = toWorld(sp.x, sp.y);
+    fp.lerp(targetW, Math.min(1, dt*3));
+  });
+  const elapsed = performance.now()-ex.stepStart;
+  if(elapsed>=ex.stepDuration){
+    const oldHolderSaved = ballHolderInSavedStep(ex.play, ex.stepIdx);
+    ex.stepIdx++;
+    ex.stepStart = performance.now();
+    if(ex.stepIdx>=ex.play.steps.length){
+      three.scriptedExec = null; // coreografia terminou, devolve o controle pra IA genérica
+      return;
+    }
+    const newHolderSaved = ballHolderInSavedStep(ex.play, ex.stepIdx);
+    if(newHolderSaved!=null && newHolderSaved!==oldHolderSaved){
+      const fromLive = ex.mapping[oldHolderSaved];
+      const toLive = ex.mapping[newHolderSaved];
+      if(toLive!=null){
+        const fromPos = fromLive===three.povId ? three.manualPos : (fromLive!=null ? three.frozenPositions[fromLive] : three.manualBallPos);
+        const toPos = toLive===three.povId ? three.manualPos : three.frozenPositions[toLive];
+        if(fromPos && toPos){
+          const dist = fromPos.distanceTo(toPos);
+          three.passAnim = {from: fromPos.clone(), to: toPos.clone(), start: performance.now(), duration: Math.max(200,(dist/BALL_SPEED)*1000), isPivotPass:false};
+          three.manualBallPos = null;
+        }
+      }
+    }
+  }
+}
+
+function getBallHolderEntity(){
+  if(three.aiPossession && three.aiPossession.holderId!=null){
+    const e = three.snap.entities.find(x=>x.id===three.aiPossession.holderId);
+    if(e) return e;
+  }
+  if(!three.manualBallPos) return null;
+  let bestId=null, bestDist=Infinity;
+  three.snap.entities.forEach(x=>{
+    if(x.team==='ball') return;
+    const p = entityWorldPos(x.id);
+    if(!p) return;
+    const d = p.distanceTo(three.manualBallPos);
+    if(d<bestDist){ bestDist=d; bestId=x.id; }
+  });
+  return bestDist<1.6 ? three.snap.entities.find(x=>x.id===bestId) : null;
+}
+// regra 1: 1x1 na ala — está isolado (sem outro defensor por perto ajudando)
+// e na zona larga da quadra (perto da lateral)? contém, não desarma no susto
+function isIsolatedWing1v1(markedId){
+  const markedPos = entityWorldPos(markedId);
+  if(!markedPos || !three.manualBallPos) return false;
+  if(markedPos.distanceTo(three.manualBallPos) > 1.6) return false; // só conta se ele estiver com a bola de fato
+  const isWide = Math.abs(markedPos.z) > COURT_WID*0.28;
+  if(!isWide) return false;
+  let nearbyDefenders = 0;
+  three.snap.entities.forEach(d=>{
+    if(d.team!=='red') return;
+    const dp = entityWorldPos(d.id);
+    if(!dp) return;
+    if(dp.distanceTo(markedPos) < 4) nearbyDefenders++;
+  });
+  return nearbyDefenders<=1;
+}
+
 function moveOffBallSupport(e, fp, dt, ballWorldPos){
   const isBlue = e.team==='blue';
   const lane = (three.aiLanes && three.aiLanes[e.id]!=null) ? three.aiLanes[e.id] : 0.5;
   const targetZ = -(lane-0.5)*COURT_WID;
   const refX = ballWorldPos ? ballWorldPos.x : fp.x;
   // "à frente" quer dizer rumo ao gol que o time ataca: azul ataca x negativo, vermelho ataca x positivo
-  const aheadBias = isBlue ? -(3+Math.random()*3) : (3+Math.random()*3);
+  let aheadBias = isBlue ? -(3+Math.random()*3) : (3+Math.random()*3);
+  // regra 2: goleiro adversário com a bola -> não pressiona alto (risco de
+  // passe nas costas), segura a linha mais recuada
+  const holder = getBallHolderEntity();
+  if(holder && holder.isGoalkeeper && holder.team!==e.team){
+    aheadBias *= 0.15;
+  }
   const HLc = COURT_LEN/2-1.2;
   const targetX = Math.max(-HLc, Math.min(HLc, refX + aheadBias));
   const toTarget = new THREE.Vector3(targetX-fp.x, 0, targetZ-fp.z);
@@ -2930,6 +3109,7 @@ function resetAfterGoal(){
   // reposiciona a bola no centro e "solta" o lance de novo, sem precisar sair do modo controle
   three.manualBallPos = new THREE.Vector3(0,0,0);
   three.aiPossession = null;
+  three.scriptedExec = null;
   three.goalCooldown = false;
 }
 
@@ -3008,6 +3188,8 @@ function renderControlFrame(dt){
   three.camera.up.set(0,1,0);
   three.camera.lookAt(target);
 
+  updateScriptedExec(dt);
+
   three.snap.entities.forEach(e=>{
     if(e.id===three.povId || e.team==='ball') return;
     const mesh = three.meshes[e.id];
@@ -3030,7 +3212,11 @@ function renderControlFrame(dt){
             handledByChase = true;
             const toTarget = targetPos.clone().sub(fp);
             const dist = toTarget.length();
-            const chaseSpeed = 5.6, stopDist = 1.05;
+            // regra: 1x1 na ala, isolado (sem ajuda perto) -> contém a uma
+            // distância segura, não desarma no susto (risco de ser driblado)
+            const isolatedWing = isIsolatedWing1v1(pairEnt.id);
+            const chaseSpeed = isolatedWing ? 4.2 : 5.6;
+            const stopDist = isolatedWing ? 2.1 : 1.05;
             if(dist>stopDist){
               toTarget.normalize();
               fp.add(toTarget.multiplyScalar(Math.min(chaseSpeed*dt, dist-stopDist)));
@@ -3040,9 +3226,12 @@ function renderControlFrame(dt){
           }
         }
       }
-      if(!handledByChase && !e.isGoalkeeper){
+      const inScriptedExec = three.scriptedExec && scriptedLiveIds().includes(e.id);
+      if(!handledByChase && !e.isGoalkeeper && !inScriptedExec){
         const spd = moveOffBallSupport(e, fp, dt, three.manualBallPos);
         if(spd>0){ chaseSpd = spd; mesh.rotation.y = Math.atan2(fp.x-mesh.position.x||0.001, fp.z-mesh.position.z||0.001); }
+      } else if(inScriptedExec){
+        chaseSpd = 3.6; // mantém a animação de corrida enquanto segue a coreografia
       }
       mesh.position.copy(fp);
       const rig = mesh.userData.rig;
@@ -3100,7 +3289,12 @@ function renderControlFrame(dt){
       }
     } else if(ballMesh && three.manualBallPos){
       ballMesh.position.copy(three.manualBallPos);
-      updateBallPossessionAI();
+      if(three.scriptedExec){
+        three.aiPossession = null; // a coreografia comanda o passe, não a IA genérica
+      } else {
+        checkScriptedPlayTrigger();
+        updateBallPossessionAI();
+      }
       checkGoal();
     }
   }
@@ -3287,6 +3481,8 @@ document.getElementById('controlModeBtn').onclick = ()=>{
     if(!three.score) three.score = {blue:0, red:0};
     three.goalCooldown = false;
     three.aiPossession = null;
+    three.scriptedExec = null;
+    loadScriptedPlays();
     document.getElementById('scoreHUD').style.display = 'block';
     updateScoreHUD();
   } else {
