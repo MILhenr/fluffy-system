@@ -2797,11 +2797,31 @@ function switchControlTo(newPovId){
 // ---------------------------------------------------------------------------
 function assignAiLanes(){
   three.aiLanes = {};
+  three.aiRoles = {};
   ['blue','red'].forEach(team=>{
+    const isBlue = team==='blue';
     const list = three.snap.entities.filter(e=>e.team===team && e.id!==three.povId && !e.isGoalkeeper);
-    const n = list.length;
-    list.forEach((e,i)=>{
-      three.aiLanes[e.id] = n>1 ? (i/(n-1))*0.78+0.11 : 0.5; // espalha de 0.11 a 0.89 na largura
+    const withPos = list.map(e=>{
+      const p = entityWorldPos(e.id) || new THREE.Vector3(0,0,0);
+      return {e, x:p.x, z:p.z};
+    });
+    // o mais avançado no sentido do ataque do time vira pivô — ele é o
+    // ponto de referência lá na frente, não abaixa junto com o time
+    const sortedByAdvance = withPos.slice().sort((a,b)=> isBlue ? (a.x-b.x) : (b.x-a.x));
+    const pivo = sortedByAdvance[0];
+    const rest = sortedByAdvance.slice(1);
+    // dos que sobraram, os 2 mais largos viram alas; o resto vira fixo
+    const sortedByWidth = rest.slice().sort((a,b)=> Math.abs(b.z)-Math.abs(a.z));
+    const ala1 = sortedByWidth[0], ala2 = sortedByWidth[1];
+    if(pivo) three.aiRoles[pivo.e.id] = 'pivo';
+    [ala1, ala2].forEach((a,i)=>{
+      if(!a) return;
+      three.aiRoles[a.e.id] = 'ala';
+      three.aiLanes[a.e.id] = i===0 ? 0.15 : 0.85;
+    });
+    rest.forEach(r=>{
+      if(r===ala1 || r===ala2) return;
+      three.aiRoles[r.e.id] = 'fixo';
     });
   });
 }
@@ -2985,19 +3005,37 @@ function isIsolatedWing1v1(markedId){
 
 function moveOffBallSupport(e, fp, dt, ballWorldPos){
   const isBlue = e.team==='blue';
-  const lane = (three.aiLanes && three.aiLanes[e.id]!=null) ? three.aiLanes[e.id] : 0.5;
-  const targetZ = -(lane-0.5)*COURT_WID;
+  const role = (three.aiRoles && three.aiRoles[e.id]) || 'ala';
   const refX = ballWorldPos ? ballWorldPos.x : fp.x;
-  // "à frente" quer dizer rumo ao gol que o time ataca: azul ataca x negativo, vermelho ataca x positivo
-  let aheadBias = isBlue ? -(3+Math.random()*3) : (3+Math.random()*3);
-  // regra 2: goleiro adversário com a bola -> não pressiona alto (risco de
-  // passe nas costas), segura a linha mais recuada
-  const holder = getBallHolderEntity();
-  if(holder && holder.isGoalkeeper && holder.team!==e.team){
-    aheadBias *= 0.15;
-  }
   const HLc = COURT_LEN/2-1.2;
-  const targetX = Math.max(-HLc, Math.min(HLc, refX + aheadBias));
+  const goalX = isBlue ? -COURT_LEN/2 : COURT_LEN/2; // gol que o time ataca
+  const dirSign = isBlue ? -1 : 1;
+
+  let targetX, targetZ;
+  if(role==='pivo'){
+    // o pivô é a referência lá na frente — NUNCA recua junto com o time
+    // quando a bola volta pro campo de defesa, ele continua avançado,
+    // oferecendo profundidade pra jogada sair de trás
+    targetX = goalX - dirSign*(6+Math.sin(performance.now()/1500+e.id)*2.5);
+    targetZ = Math.sin(performance.now()/2000+e.id)*3.5;
+  } else if(role==='fixo'){
+    // o fixo organiza mais perto/central, referência de saída de jogo
+    targetZ = Math.sin(performance.now()/1800+e.id)*COURT_WID*0.18;
+    const aheadBias = dirSign*(1.5+Math.random()*1.5);
+    targetX = Math.max(-HLc, Math.min(HLc, refX + aheadBias));
+  } else {
+    // ala: acompanha a largura própria, avança/recua junto com a bola
+    const lane = (three.aiLanes && three.aiLanes[e.id]!=null) ? three.aiLanes[e.id] : 0.5;
+    targetZ = -(lane-0.5)*COURT_WID;
+    const aheadBias = dirSign*(3+Math.random()*3);
+    targetX = Math.max(-HLc, Math.min(HLc, refX + aheadBias));
+  }
+  // regra: goleiro adversário com a bola -> não pressiona alto (exceto o
+  // pivô, que já fica lá na frente por natureza do próprio papel)
+  const holder = getBallHolderEntity();
+  if(role!=='pivo' && holder && holder.isGoalkeeper && holder.team!==e.team){
+    targetX = fp.x*0.82 + targetX*0.18;
+  }
   const toTarget = new THREE.Vector3(targetX-fp.x, 0, targetZ-fp.z);
   const dist = toTarget.length();
   const supportSpeed = 3.6;
