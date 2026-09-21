@@ -191,6 +191,12 @@
       <div class="hud">
         <div class="badge">RECONSTRUÇÃO 3D · gerada a partir da prancha tática</div>
         <div class="badge" id="viewer3DModeBadge">PRIMEIRA PESSOA</div>
+        <div id="scoreHUD" style="display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.55);border-radius:10px;padding:6px 14px;font-weight:800;font-size:15px;color:#fff;z-index:30;letter-spacing:0.5px;">
+          <span style="color:#5b8def;">AZUL</span> <span id="scoreBlue">0</span> — <span id="scoreRed">0</span> <span style="color:#e05b5b;">VERMELHO</span>
+        </div>
+        <div id="goalFlash" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;z-index:40;pointer-events:none;">
+          <div style="font-size:44px;font-weight:900;color:#fff;text-shadow:0 0 20px rgba(0,0,0,0.8), 0 0 40px #e0b84a;letter-spacing:2px;">⚽ GOL!</div>
+        </div>
       </div>
       <div id="controlPad" style="display:none;position:absolute;left:0;right:0;bottom:16px;justify-content:space-between;align-items:flex-end;padding:0 16px;pointer-events:none;">
         <div style="display:grid;grid-template-columns:56px 56px 56px;grid-template-rows:56px 56px 56px;gap:6px;pointer-events:auto;">
@@ -1256,14 +1262,21 @@ async function loadMovementByKey(key){
 let playlistState = null;
 function startPlaylist(seq, quizMode){
   trainingCurrent = null; // não deixa o quiz de "Reconhecimento" disparar por engano junto
-  playlistState = {seq, quizMode, pos:0};
+  playlistState = {seq, quizMode, pos:0, loading:false};
   playPlaylistEntry();
 }
 async function playPlaylistEntry(){
-  if(!playlistState) return;
+  if(!playlistState || playlistState.loading) return;
+  playlistState.loading = true;
   const entry = playlistState.seq[playlistState.pos];
   const data = await loadMovementByKey(entry.key);
-  if(!data){ playlistState.pos = (playlistState.pos+1) % playlistState.seq.length; playPlaylistEntry(); return; }
+  if(!playlistState){ return; } // saiu da playlist enquanto carregava
+  if(!data){
+    playlistState.pos = (playlistState.pos+1) % playlistState.seq.length;
+    playlistState.loading = false;
+    playPlaylistEntry();
+    return;
+  }
   applyImportedPlay(data);
   if(document.getElementById('viewer3D').style.display==='none'){
     document.getElementById('goto3D').click();
@@ -1274,9 +1287,10 @@ async function playPlaylistEntry(){
   }
   const badge = document.getElementById('viewer3DModeBadge');
   if(badge) badge.textContent = `PLAYLIST ${playlistState.pos+1}/${playlistState.seq.length}`;
+  playlistState.loading = false;
 }
 function advancePlaylist(){
-  if(!playlistState) return;
+  if(!playlistState || playlistState.loading) return;
   if(playlistState.quizMode){
     showPlaylistQuiz();
     return;
@@ -2641,6 +2655,7 @@ function animate3D(){
           stopRecordingManual();
         } else if(playlistState){
           three.t = dur;
+          three.playing = false; // trava aqui até a próxima jogada terminar de carregar — evita disparar de novo por engano
           advancePlaylist();
           return;
         } else {
@@ -2768,6 +2783,157 @@ function switchControlTo(newPovId){
   startCameraTransition();
 }
 
+// ---------------------------------------------------------------------------
+// IA POR REGRAS — modo Controlar agora tem um "jogo" de verdade rolando ao
+// seu redor: companheiros se movem sozinhos pra abrir espaço/apoiar, quem tem
+// a bola (se não for você) decide sozinho entre passar/driblar/chutar, e gol
+// de verdade conta no placar.
+// ---------------------------------------------------------------------------
+function assignAiLanes(){
+  three.aiLanes = {};
+  ['blue','red'].forEach(team=>{
+    const list = three.snap.entities.filter(e=>e.team===team && e.id!==three.povId && !e.isGoalkeeper);
+    const n = list.length;
+    list.forEach((e,i)=>{
+      three.aiLanes[e.id] = n>1 ? (i/(n-1))*0.78+0.11 : 0.5; // espalha de 0.11 a 0.89 na largura
+    });
+  });
+}
+function updateScoreHUD(){
+  if(!three.score) return;
+  document.getElementById('scoreBlue').textContent = three.score.blue;
+  document.getElementById('scoreRed').textContent = three.score.red;
+}
+function entityWorldPos(id){
+  return id===three.povId ? three.manualPos : three.frozenPositions[id];
+}
+
+// companheiros sem bola: correm pra apoiar (avançam um pouco à frente de
+// quem tá com a bola, mantendo a própria faixa de largura)
+function moveOffBallSupport(e, fp, dt, ballWorldPos){
+  const isBlue = e.team==='blue';
+  const lane = (three.aiLanes && three.aiLanes[e.id]!=null) ? three.aiLanes[e.id] : 0.5;
+  const targetZ = -(lane-0.5)*COURT_WID;
+  const refX = ballWorldPos ? ballWorldPos.x : fp.x;
+  // "à frente" quer dizer rumo ao gol que o time ataca: azul ataca x negativo, vermelho ataca x positivo
+  const aheadBias = isBlue ? -(3+Math.random()*3) : (3+Math.random()*3);
+  const HLc = COURT_LEN/2-1.2;
+  const targetX = Math.max(-HLc, Math.min(HLc, refX + aheadBias));
+  const toTarget = new THREE.Vector3(targetX-fp.x, 0, targetZ-fp.z);
+  const dist = toTarget.length();
+  const supportSpeed = 3.6;
+  let spd = 0;
+  if(dist>0.6){
+    toTarget.normalize();
+    fp.add(toTarget.multiplyScalar(Math.min(supportSpeed*dt, dist-0.6)));
+    spd = supportSpeed;
+  }
+  return spd;
+}
+
+// ---- posse de bola: quem está mais perto, decide (se não for você) ----
+function updateBallPossessionAI(){
+  if(!three.manualBallPos || three.passAnim || three.goalCooldown) { return; }
+  let closestId=null, closestDist=Infinity;
+  three.snap.entities.forEach(e=>{
+    if(e.team==='ball' || e.isGoalkeeper) return;
+    const pos = entityWorldPos(e.id);
+    if(!pos) return;
+    const d = pos.distanceTo(three.manualBallPos);
+    if(d<closestDist){ closestDist=d; closestId=e.id; }
+  });
+  if(closestDist>1.3){ return; }
+  if(!three.aiPossession || three.aiPossession.holderId!==closestId){
+    three.aiPossession = {holderId:closestId, since:performance.now(), decided:false};
+  }
+  if(closestId===three.povId) return; // você decide na mão (Passe / Passe Pivô)
+  const heldMs = performance.now()-three.aiPossession.since;
+  if(heldMs>750 && !three.aiPossession.decided){
+    three.aiPossession.decided = true;
+    aiDecideAction(closestId);
+  }
+}
+function aiDecideAction(holderId){
+  const holderEnt = three.snap.entities.find(e=>e.id===holderId);
+  const holderPos = entityWorldPos(holderId);
+  if(!holderEnt || !holderPos) return;
+  const isBlue = holderEnt.team==='blue';
+  const goalX = isBlue ? -COURT_LEN/2 : COURT_LEN/2; // azul ataca x negativo, vermelho ataca x positivo
+  const distToGoal = Math.abs(holderPos.x - goalX);
+
+  if(distToGoal < 9){ aiShoot(holderId, goalX); return; }
+
+  // procura o companheiro mais adiantado e mais livre de marcação
+  const teammates = three.snap.entities.filter(e=>e.team===holderEnt.team && e.id!==holderId && e.team!=='ball' && !e.isGoalkeeper);
+  let bestId=null, bestScore=-Infinity;
+  teammates.forEach(e=>{
+    const pos = entityWorldPos(e.id);
+    if(!pos) return;
+    const forwardness = isBlue ? (holderPos.x-pos.x) : (pos.x-holderPos.x);
+    if(forwardness < -4) return; // evita passe muito pra trás
+    let nearestDefDist = 999;
+    three.snap.entities.forEach(d=>{
+      if(d.team===holderEnt.team || d.team==='ball') return;
+      const dp = entityWorldPos(d.id);
+      if(!dp) return;
+      const dd = dp.distanceTo(pos);
+      if(dd<nearestDefDist) nearestDefDist = dd;
+    });
+    const score = forwardness*0.7 + nearestDefDist;
+    if(score>bestScore){ bestScore=score; bestId=e.id; }
+  });
+  if(bestId!=null && bestScore>2.2){
+    aiPass(holderId, bestId);
+  } else {
+    // sem opção boa agora: segue driblando, reavalia rapidinho
+    three.aiPossession.decided = false;
+    three.aiPossession.since = performance.now() - 500;
+  }
+}
+function aiPass(fromId, toId){
+  const from = entityWorldPos(fromId);
+  const to = entityWorldPos(toId);
+  if(!from || !to) return;
+  const dist = from.distanceTo(to);
+  three.passAnim = {from: from.clone(), to: to.clone(), start: performance.now(), duration: Math.max(220,(dist/BALL_SPEED)*1000), isPivotPass:false};
+  three.manualBallPos = null;
+}
+function aiShoot(holderId, goalX){
+  const from = entityWorldPos(holderId);
+  if(!from) return;
+  const to = new THREE.Vector3(goalX, 0, (Math.random()-0.5)*2.2);
+  const dist = from.distanceTo(to);
+  three.passAnim = {from: from.clone(), to, start: performance.now(), duration: Math.max(180,(dist/(BALL_SPEED*1.7))*1000), isPivotPass:false, isShot:true};
+  three.manualBallPos = null;
+}
+
+// ---- gol de verdade: conta no placar e reinicia o lance ----
+function checkGoal(){
+  if(!three.manualBallPos || three.goalCooldown) return;
+  const gx = three.manualBallPos.x, gz = three.manualBallPos.z;
+  const nearLeftGoal = gx < -COURT_LEN/2+0.4 && Math.abs(gz)<1.6;
+  const nearRightGoal = gx > COURT_LEN/2-0.4 && Math.abs(gz)<1.6;
+  if(nearLeftGoal || nearRightGoal){
+    if(!three.score) three.score = {blue:0, red:0};
+    // gol do lado esquerdo (x negativo) é o gol que o azul ataca -> ponto pro azul
+    if(nearLeftGoal) three.score.blue++; else three.score.red++;
+    updateScoreHUD();
+    three.goalCooldown = true;
+    three.aiPossession = null;
+    const flash = document.getElementById('goalFlash');
+    flash.style.display = 'flex';
+    setTimeout(()=>{ flash.style.display = 'none'; }, 1300);
+    setTimeout(()=>{ resetAfterGoal(); }, 1400);
+  }
+}
+function resetAfterGoal(){
+  // reposiciona a bola no centro e "solta" o lance de novo, sem precisar sair do modo controle
+  three.manualBallPos = new THREE.Vector3(0,0,0);
+  three.aiPossession = null;
+  three.goalCooldown = false;
+}
+
+
 function renderControlFrame(dt){
   const povEntity = three.snap.entities.find(e=>e.id===three.povId);
   if(!povEntity || !three.manualPos) return;
@@ -2849,14 +3015,19 @@ function renderControlFrame(dt){
     const fp = three.frozenPositions[e.id];
     if(fp){
       // marcadores (vermelho com par definido) perseguem de verdade quem
-      // estão marcando — inclusive o jogador que você está controlando
+      // estão marcando — inclusive o jogador que você está controlando.
+      // os demais (companheiros azuis, e vermelhos sem marcação definida)
+      // se movem sozinhos pra apoiar/ocupar espaço — o jogo continua
+      // acontecendo ao seu redor, não fica tudo parado esperando por você
       let chaseSpd = 0;
+      let handledByChase = false;
       if(e.team==='red'){
         const ent2D = entities.find(x=>x.id===e.id);
         const pairEnt = ent2D ? findPairEntity(ent2D) : null;
         if(pairEnt){
           const targetPos = pairEnt.id===three.povId ? three.manualPos : three.frozenPositions[pairEnt.id];
           if(targetPos){
+            handledByChase = true;
             const toTarget = targetPos.clone().sub(fp);
             const dist = toTarget.length();
             const chaseSpeed = 5.6, stopDist = 1.05;
@@ -2868,6 +3039,10 @@ function renderControlFrame(dt){
             mesh.rotation.y = Math.atan2(toTarget.x, toTarget.z);
           }
         }
+      }
+      if(!handledByChase && !e.isGoalkeeper){
+        const spd = moveOffBallSupport(e, fp, dt, three.manualBallPos);
+        if(spd>0){ chaseSpd = spd; mesh.rotation.y = Math.atan2(fp.x-mesh.position.x||0.001, fp.z-mesh.position.z||0.001); }
       }
       mesh.position.copy(fp);
       const rig = mesh.userData.rig;
@@ -2902,8 +3077,12 @@ function renderControlFrame(dt){
       if(u>=1){
         three.manualBallPos = three.passAnim.to.clone();
         const wasPivotPass = three.passAnim.isPivotPass;
+        const wasShot = three.passAnim.isShot;
         three.passAnim = null;
-        if(wasPivotPass && (!three.qte || three.qte.resolved)){
+        three.aiPossession = null;
+        if(wasShot){
+          checkGoal();
+        } else if(wasPivotPass && (!three.qte || three.qte.resolved)){
           const povEntityNow = three.snap.entities.find(e=>e.id===three.povId);
           if(povEntityNow){
             let nearestId = null, nearestDist = Infinity;
@@ -2921,6 +3100,8 @@ function renderControlFrame(dt){
       }
     } else if(ballMesh && three.manualBallPos){
       ballMesh.position.copy(three.manualBallPos);
+      updateBallPossessionAI();
+      checkGoal();
     }
   }
 }
@@ -3102,10 +3283,17 @@ document.getElementById('controlModeBtn').onclick = ()=>{
     three.qte = null; three.qteCooldownUntil = 0;
     document.getElementById('qteOverlay').style.display = 'none';
     three.freeLookYaw = 0; three.freeLookPitch = 0;
+    assignAiLanes();
+    if(!three.score) three.score = {blue:0, red:0};
+    three.goalCooldown = false;
+    three.aiPossession = null;
+    document.getElementById('scoreHUD').style.display = 'block';
+    updateScoreHUD();
   } else {
     moveInput = {fwd:false, back:false, left:false, right:false};
     three.qte = null;
     document.getElementById('qteOverlay').style.display = 'none';
+    document.getElementById('scoreHUD').style.display = 'none';
     startCameraTransition();
   }
 };
