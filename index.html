@@ -197,6 +197,9 @@
         <div id="goalFlash" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;z-index:40;pointer-events:none;">
           <div style="font-size:44px;font-weight:900;color:#fff;text-shadow:0 0 20px rgba(0,0,0,0.8), 0 0 40px #e0b84a;letter-spacing:2px;">⚽ GOL!</div>
         </div>
+        <div id="moveErrorFlash" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;z-index:40;pointer-events:none;">
+          <div style="font-size:32px;font-weight:900;color:#fff;text-shadow:0 0 20px rgba(0,0,0,0.8), 0 0 40px #d84f3a;letter-spacing:1px;text-align:center;">❌ Movimento errado<br><span style="font-size:16px;font-weight:600;">reiniciando a jogada...</span></div>
+        </div>
       </div>
       <div id="controlPad" style="display:none;position:absolute;left:0;right:0;bottom:16px;justify-content:space-between;align-items:flex-end;padding:0 16px;pointer-events:none;">
         <div style="display:grid;grid-template-columns:56px 56px 56px;grid-template-rows:56px 56px 56px;gap:6px;pointer-events:auto;">
@@ -2951,6 +2954,14 @@ function checkScriptedPlayTrigger(){
     }
   }
 }
+function initScriptedExecState(play, mapping, stepIdx){
+  let povSavedId = null;
+  Object.entries(mapping).forEach(([savedId, liveId])=>{ if(liveId===three.povId) povSavedId = savedId; });
+  three.scriptedExec = {
+    play, mapping, stepIdx, stepStart: performance.now(), stepDuration: 1300,
+    povSavedId, povStepStartPos: three.manualPos ? three.manualPos.clone() : null
+  };
+}
 function startScriptedPlay(play){
   const savedBlue = play.entities.filter(e=>e.team==='blue');
   const liveBlue = three.snap.entities.filter(e=>e.team==='blue' && !e.isGoalkeeper);
@@ -2970,7 +2981,7 @@ function startScriptedPlay(play){
     });
     if(bestId!=null){ mapping[se.id]=bestId; usedLive.add(bestId); }
   });
-  three.scriptedExec = {play, mapping, stepIdx:0, stepStart:performance.now(), stepDuration:1300};
+  initScriptedExecState(play, mapping, 0);
 }
 // quando você entra no modo Controlar enquanto uma jogada salva (com mais de
 // uma etapa) está carregada, os outros jogadores continuam seguindo essa
@@ -2979,10 +2990,52 @@ function startCurrentPlayScript(){
   if(!steps || steps.length<3) return;
   const mapping = {};
   entities.forEach(en=>{ if(en.team!=='ball') mapping[en.id] = en.id; });
-  three.scriptedExec = {play:{entities, steps}, mapping, stepIdx:0, stepStart:performance.now(), stepDuration:1300};
+  // continua de onde a reprodução estava (three.t), em vez de voltar pro
+  // início da jogada — é isso que causava o "tudo bugado, todo mundo
+  // pulando de volta pro começo"
+  const durs = allDurations();
+  let acc = 0, startIdx = 0;
+  const curT = three.t || 0;
+  for(let i=0;i<durs.length;i++){
+    if(curT < acc+durs[i]){ startIdx = i; break; }
+    acc += durs[i];
+    startIdx = i+1;
+  }
+  startIdx = Math.min(startIdx, steps.length-1);
+  initScriptedExecState({entities, steps}, mapping, startIdx);
 }
 function scriptedLiveIds(){
   return three.scriptedExec ? Object.values(three.scriptedExec.mapping) : [];
+}
+function showScriptedMoveError(){
+  const flash = document.getElementById('moveErrorFlash');
+  flash.style.display = 'flex';
+  setTimeout(()=>{ flash.style.display = 'none'; }, 1200);
+  restartScriptedExec();
+}
+function restartScriptedExec(){
+  const ex = three.scriptedExec;
+  if(!ex) return;
+  ex.stepIdx = 0;
+  ex.stepStart = performance.now();
+  const step0 = ex.play.steps[0];
+  Object.entries(ex.mapping).forEach(([savedId, liveId])=>{
+    const sp = step0.positions[savedId];
+    if(!sp) return;
+    const w = toWorld(sp.x, sp.y);
+    if(liveId===three.povId){
+      three.manualPos.copy(w);
+      ex.povStepStartPos = w.clone();
+    } else {
+      const fp = three.frozenPositions[liveId];
+      if(fp) fp.copy(w);
+    }
+  });
+  const ballEnt = ex.play.entities.find(e=>e.team==='ball');
+  if(ballEnt){
+    const bp = step0.positions[ballEnt.id];
+    if(bp){ three.manualBallPos = toWorld(bp.x, bp.y); three.passAnim = null; }
+  }
 }
 function updateScriptedExec(dt){
   const ex = three.scriptedExec;
@@ -3004,9 +3057,34 @@ function updateScriptedExec(dt){
   });
   const elapsed = performance.now()-ex.stepStart;
   if(elapsed>=ex.stepDuration){
+    // confere se você (na sua etapa) se moveu no sentido certo — com folga
+    // generosa, não precisa ficar em cima da linha exata
+    if(ex.povSavedId!=null && ex.povStepStartPos && three.manualPos){
+      const sp0 = curStep.positions[ex.povSavedId];
+      const nextStep = ex.play.steps[ex.stepIdx+1];
+      const sp1 = nextStep ? nextStep.positions[ex.povSavedId] : null;
+      if(sp0 && sp1){
+        const startW = toWorld(sp0.x, sp0.y);
+        const targetW = toWorld(sp1.x, sp1.y);
+        const expectedDir = targetW.clone().sub(startW);
+        const expectedDist = expectedDir.length();
+        if(expectedDist > 1.0){
+          const actualDir = three.manualPos.clone().sub(ex.povStepStartPos);
+          const actualDist = actualDir.length();
+          expectedDir.normalize();
+          const wentFarEnough = actualDist >= expectedDist*0.25;
+          const wentRoughlyRightWay = actualDist>0.01 ? expectedDir.dot(actualDir.clone().normalize()) > 0.15 : false;
+          if(!wentFarEnough || !wentRoughlyRightWay){
+            showScriptedMoveError();
+            return;
+          }
+        }
+      }
+    }
     const oldHolderSaved = ballHolderInSavedStep(ex.play, ex.stepIdx);
     ex.stepIdx++;
     ex.stepStart = performance.now();
+    ex.povStepStartPos = three.manualPos ? three.manualPos.clone() : null;
     if(ex.stepIdx>=ex.play.steps.length){
       three.scriptedExec = null; // coreografia terminou, devolve o controle pra IA genérica
       return;
@@ -3368,7 +3446,7 @@ function renderControlFrame(dt){
   const povEntity = three.snap.entities.find(e=>e.id===three.povId);
   if(!povEntity || !three.manualPos) return;
 
-  const runSpeed = 6.5;
+  const runSpeed = 8.5;
   const yaw = three.manualYaw + (three.freeLookYaw||0);
   const fwdDir = new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));
   const rightDir = new THREE.Vector3(Math.sin(yaw+Math.PI/2),0,-Math.cos(yaw+Math.PI/2));
@@ -3768,12 +3846,17 @@ document.getElementById('controlModeBtn').onclick = ()=>{
 };
 function wireHoldButton(id, key){
   const btn = document.getElementById(id);
-  const start = (ev)=>{ ev.preventDefault(); moveInput[key]=true; };
+  const start = (ev)=>{
+    ev.preventDefault();
+    moveInput[key]=true;
+    try{ btn.setPointerCapture(ev.pointerId); }catch(e){}
+  };
   const stop = ()=>{ moveInput[key]=false; };
   btn.addEventListener('pointerdown', start);
   btn.addEventListener('pointerup', stop);
   btn.addEventListener('pointercancel', stop);
-  btn.addEventListener('pointerleave', stop);
+  // sem pointerleave: o dedo desliza um pouco na tela do celular e não pode
+  // cancelar o movimento à toa — só solta de verdade (pointerup/cancel)
 }
 wireHoldButton('moveFwdBtn','fwd');
 wireHoldButton('moveBackBtn','back');
