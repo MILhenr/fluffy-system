@@ -3781,6 +3781,13 @@ document.getElementById('goto3D').onclick = ()=>{
   document.getElementById('play3DBtn').textContent = '⏸ Pausar';
   setTimeout(refreshThreeSize, 30);
   requestAnimationFrame(animate3D);
+  // jogada salva de verdade (várias etapas): já entra controlando seu
+  // jogador direto, sem precisar apertar "Controlar" à parte — só os outros
+  // seguem a coreografia sozinhos. Não se aplica a situações de
+  // Reconhecimento (só 2 etapas) nem à Playlist (reprodução passiva)
+  if(steps.length>=3 && !playlistState){
+    setTimeout(()=>{ document.getElementById('controlModeBtn').click(); }, 60);
+  }
 };
 document.getElementById('backTo2D').onclick = ()=>{
   three.playing = false;
