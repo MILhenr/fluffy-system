@@ -1261,6 +1261,7 @@ async function loadMovementByKey(key){
   }catch(e){ return null; }
 }
 let playlistState = null;
+let autoControlOnEnter = false; // true logo depois de carregar uma jogada salva na biblioteca
 function startPlaylist(seq, quizMode){
   trainingCurrent = null; // não deixa o quiz de "Reconhecimento" disparar por engano junto
   playlistState = {seq, quizMode, pos:0, loading:false};
@@ -1969,6 +1970,7 @@ document.getElementById('loadMovementBtn').onclick = async ()=>{
           document.getElementById('addBall').disabled = !!entities.find(e=>e.team==='ball');
           recomputeAllStepsAutoFacing();
           updateStepUI(); draw(); refreshPovSelect();
+          autoControlOnEnter = true; // ao ir pro 3D, já entra controlando seu jogador
           overlay.remove();
         }catch(e){ console.error(e); loadBtn.textContent = 'Erro'; loadBtn.disabled = false; }
       };
@@ -3045,6 +3047,7 @@ function updateScriptedExec(dt){
     if(holder && holder.team==='red'){ three.scriptedExec = null; return; }
   }
   const curStep = ex.play.steps[ex.stepIdx];
+  const nextStep = ex.play.steps[ex.stepIdx+1];
   Object.entries(ex.mapping).forEach(([savedId, liveId])=>{
     if(liveId===three.povId) return; // o jogador que você controla, você decide — não força
     const sp = curStep.positions[savedId];
@@ -3053,32 +3056,29 @@ function updateScriptedExec(dt){
     const targetW = toWorld(sp.x, sp.y);
     fp.lerp(targetW, Math.min(1, dt*3));
   });
-  const elapsed = performance.now()-ex.stepStart;
-  if(elapsed>=ex.stepDuration){
-    // confere se você (na sua etapa) se moveu no sentido certo — com folga
-    // generosa, não precisa ficar em cima da linha exata
-    if(ex.povSavedId!=null && ex.povStepStartPos && three.manualPos){
-      const sp0 = curStep.positions[ex.povSavedId];
-      const nextStep = ex.play.steps[ex.stepIdx+1];
-      const sp1 = nextStep ? nextStep.positions[ex.povSavedId] : null;
-      if(sp0 && sp1){
-        const startW = toWorld(sp0.x, sp0.y);
-        const targetW = toWorld(sp1.x, sp1.y);
-        const expectedDir = targetW.clone().sub(startW);
-        const expectedDist = expectedDir.length();
-        if(expectedDist > 1.0){
-          const actualDir = three.manualPos.clone().sub(ex.povStepStartPos);
-          const actualDist = actualDir.length();
-          expectedDir.normalize();
-          const wentFarEnough = actualDist >= expectedDist*0.25;
-          const wentRoughlyRightWay = actualDist>0.01 ? expectedDir.dot(actualDir.clone().normalize()) > 0.15 : false;
-          if(!wentFarEnough || !wentRoughlyRightWay){
-            triggerMarkerSteal();
-            return;
-          }
-        }
-      }
+
+  // se você tem um papel nessa etapa, os outros esperam VOCÊ chegar no seu
+  // lugar antes de avançar — a dinâmica trava em cima do seu movimento, do
+  // jeito que você pediu, não num cronômetro fixo
+  let povTargetW = null, povReady = true;
+  if(ex.povSavedId!=null && nextStep && three.manualPos){
+    const sp1 = nextStep.positions[ex.povSavedId];
+    if(sp1){
+      povTargetW = toWorld(sp1.x, sp1.y);
+      povReady = three.manualPos.distanceTo(povTargetW) < 1.6;
     }
+  }
+  const elapsed = performance.now()-ex.stepStart;
+  const minTimePassed = elapsed>=ex.stepDuration;
+  if(!povReady){
+    // ainda não chegou no seu lugar — só perde a bola de verdade se demorar
+    // demais mesmo tendo tempo de sobra (evita travar pra sempre parado)
+    if(elapsed >= ex.stepDuration*3){
+      triggerMarkerSteal();
+    }
+    return;
+  }
+  if(minTimePassed){
     const oldHolderSaved = ballHolderInSavedStep(ex.play, ex.stepIdx);
     ex.stepIdx++;
     ex.stepStart = performance.now();
@@ -3781,11 +3781,11 @@ document.getElementById('goto3D').onclick = ()=>{
   document.getElementById('play3DBtn').textContent = '⏸ Pausar';
   setTimeout(refreshThreeSize, 30);
   requestAnimationFrame(animate3D);
-  // jogada salva de verdade (várias etapas): já entra controlando seu
-  // jogador direto, sem precisar apertar "Controlar" à parte — só os outros
-  // seguem a coreografia sozinhos. Não se aplica a situações de
-  // Reconhecimento (só 2 etapas) nem à Playlist (reprodução passiva)
-  if(steps.length>=3 && !playlistState){
+  // jogada salva de verdade, carregada pela biblioteca: já entra controlando
+  // seu jogador direto, sem precisar apertar "Controlar" à parte — só os
+  // outros seguem a coreografia sozinhos
+  if(autoControlOnEnter && !playlistState){
+    autoControlOnEnter = false;
     setTimeout(()=>{ document.getElementById('controlModeBtn').click(); }, 60);
   }
 };
@@ -4004,6 +4004,7 @@ async function saveTrainingStats(){
 }
 
 document.getElementById('trainModeBtn').onclick = ()=>{
+  autoControlOnEnter = false;
   const sit = generateTrainingSituation();
   if(!sit){
     alert('Ainda não tem nenhum modelo de formação salvo. Usa "🎓 Ensinar formação" (desenha você mesmo) ou "🔍 Extrair de jogadas" (puxa das suas jogadas salvas/importadas) antes de treinar.');
