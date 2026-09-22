@@ -2972,6 +2972,15 @@ function startScriptedPlay(play){
   });
   three.scriptedExec = {play, mapping, stepIdx:0, stepStart:performance.now(), stepDuration:1300};
 }
+// quando você entra no modo Controlar enquanto uma jogada salva (com mais de
+// uma etapa) está carregada, os outros jogadores continuam seguindo essa
+// coreografia exata — só o seu boneco fica livre pra você mexer
+function startCurrentPlayScript(){
+  if(!steps || steps.length<3) return;
+  const mapping = {};
+  entities.forEach(en=>{ if(en.team!=='ball') mapping[en.id] = en.id; });
+  three.scriptedExec = {play:{entities, steps}, mapping, stepIdx:0, stepStart:performance.now(), stepDuration:1300};
+}
 function scriptedLiveIds(){
   return three.scriptedExec ? Object.values(three.scriptedExec.mapping) : [];
 }
@@ -3291,7 +3300,8 @@ function checkGoal(){
   if(nearLeftGoal || nearRightGoal){
     if(!three.score) three.score = {blue:0, red:0};
     // gol do lado esquerdo (x negativo) é o gol que o azul ataca -> ponto pro azul
-    if(nearLeftGoal) three.score.blue++; else three.score.red++;
+    if(nearLeftGoal){ three.score.blue++; three.lastConcedingTeam = 'red'; }
+    else { three.score.red++; three.lastConcedingTeam = 'blue'; }
     updateScoreHUD();
     three.goalCooldown = true;
     three.aiPossession = null;
@@ -3301,12 +3311,56 @@ function checkGoal(){
     setTimeout(()=>{ resetAfterGoal(); }, 1400);
   }
 }
+// posição de saída de bola: cada jogador no PRÓPRIO campo (azul fica em x
+// positivo, vermelho em x negativo — o lado do próprio gol), respeitando o
+// papel de cada um (pivô mais perto do meio, fixo mais recuado, alas nas
+// pontas), do jeito que times de futsal de verdade recomeçam depois de um gol
+function kickoffFormation(team, role, idx){
+  const ownHalfSign = team==='blue' ? 1 : -1;
+  let x, z;
+  if(role==='pivo'){ x = ownHalfSign*3.5; z = 0; }
+  else if(role==='fixo'){ x = ownHalfSign*(COURT_LEN*0.28); z = 0; }
+  else { x = ownHalfSign*(COURT_LEN*0.17); z = idx===0 ? -COURT_WID*0.3 : COURT_WID*0.3; }
+  return new THREE.Vector3(x, 0, z);
+}
 function resetAfterGoal(){
-  // reposiciona a bola no centro e "solta" o lance de novo, sem precisar sair do modo controle
   three.manualBallPos = new THREE.Vector3(0,0,0);
   three.aiPossession = null;
   three.scriptedExec = null;
   three.goalCooldown = false;
+
+  const alaCount = {blue:0, red:0};
+  three.snap.entities.forEach(e=>{
+    if(e.team==='ball') return;
+    const fp = three.frozenPositions[e.id];
+    if(!fp) return;
+    if(e.isGoalkeeper){
+      const isBlue = e.team==='blue';
+      fp.set(isBlue?COURT_LEN/2-0.9:-COURT_LEN/2+0.9, 0, 0);
+    } else {
+      const role = (three.aiRoles && three.aiRoles[e.id]) || 'ala';
+      let idx = 0;
+      if(role==='ala'){ idx = alaCount[e.team]; alaCount[e.team] = (alaCount[e.team]||0)+1; }
+      fp.copy(kickoffFormation(e.team, role, idx));
+    }
+    if(e.id===three.povId) three.manualPos.copy(fp);
+  });
+  // quem sofreu o gol começa com a bola (regra real de futsal) — coloca o
+  // jogador mais central desse time bem perto do centro pra puxar o jogo
+  const concedingTeam = three.lastConcedingTeam;
+  if(concedingTeam){
+    let centralId=null, centralDist=Infinity;
+    three.snap.entities.forEach(e=>{
+      if(e.team!==concedingTeam || e.isGoalkeeper || e.team==='ball') return;
+      const fp = three.frozenPositions[e.id];
+      if(!fp) return;
+      if(Math.abs(fp.z)<centralDist){ centralDist=Math.abs(fp.z); centralId=e.id; }
+    });
+    if(centralId!=null){
+      const fp = centralId===three.povId ? three.manualPos : three.frozenPositions[centralId];
+      if(fp){ fp.x = (concedingTeam==='blue'?1:-1)*1.2; fp.z = 0; }
+    }
+  }
 }
 
 
@@ -3701,6 +3755,7 @@ document.getElementById('controlModeBtn').onclick = ()=>{
     three.holdBackUntil = {};
     three.clickMoveTarget = null;
     loadScriptedPlays();
+    startCurrentPlayScript();
     document.getElementById('scoreHUD').style.display = 'block';
     updateScoreHUD();
   } else {
