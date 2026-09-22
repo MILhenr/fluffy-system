@@ -213,6 +213,7 @@
         <div style="display:flex;flex-direction:column;gap:8px;pointer-events:auto;">
           <button id="passBtn" style="width:88px;height:88px;border-radius:50%;background:#2c7a3f;border:2px solid #4aa862;color:#fff;font-size:13px;font-weight:700;">⚡<br>Passe</button>
           <button id="pivotPassBtn" style="width:88px;height:56px;border-radius:16px;background:#7a3a2c;border:2px solid #b05a3f;color:#fff;font-size:11px;font-weight:700;line-height:1.2;">🎯 Passe<br>Pivô</button>
+          <button id="passToMeBtn" style="width:88px;height:56px;border-radius:16px;background:#2c4270;border:2px solid #3d5a95;color:#fff;font-size:11px;font-weight:700;line-height:1.2;">📥 Passar<br>pra mim</button>
         </div>
       </div>
       <div id="qteOverlay" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;flex-direction:column;gap:16px;background:rgba(0,0,0,0.45);z-index:40;padding:20px;box-sizing:border-box;">
@@ -2300,20 +2301,44 @@ function initThree(){
   renderer.domElement.style.touchAction = 'none';
 
   // ---- olhar livre: arraste na tela pra virar a cabeça, 360°, mesmo durante a reprodução ----
+  // toque rápido e curto (sem arrastar) = clicar no chão pra mandar seu
+  // jogador correr até ali, no modo Controlar
   let lookDrag = null;
+  const raycaster = new THREE.Raycaster();
+  const groundPlane = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
+  function screenToGroundPoint(clientX, clientY){
+    const rect = renderer.domElement.getBoundingClientRect();
+    const ndcX = ((clientX-rect.left)/rect.width)*2-1;
+    const ndcY = -((clientY-rect.top)/rect.height)*2+1;
+    raycaster.setFromCamera({x:ndcX, y:ndcY}, camera);
+    const pt = new THREE.Vector3();
+    const hit = raycaster.ray.intersectPlane(groundPlane, pt);
+    return hit ? pt : null;
+  }
   renderer.domElement.addEventListener('pointerdown', (ev)=>{
-    lookDrag = {x: ev.clientX, y: ev.clientY};
+    lookDrag = {x: ev.clientX, y: ev.clientY, startX: ev.clientX, startY: ev.clientY, t: performance.now()};
     renderer.domElement.setPointerCapture(ev.pointerId);
   });
   renderer.domElement.addEventListener('pointermove', (ev)=>{
     if(!lookDrag || !three) return;
     const dx = ev.clientX - lookDrag.x, dy = ev.clientY - lookDrag.y;
-    lookDrag = {x: ev.clientX, y: ev.clientY};
+    lookDrag = {...lookDrag, x: ev.clientX, y: ev.clientY};
     const sens = 0.0065;
     three.freeLookYaw = (three.freeLookYaw||0) - dx*sens;
     three.freeLookPitch = Math.max(-1.3, Math.min(1.3, (three.freeLookPitch||0) - dy*sens));
   });
-  renderer.domElement.addEventListener('pointerup', ()=>{ lookDrag = null; });
+  renderer.domElement.addEventListener('pointerup', (ev)=>{
+    if(lookDrag && three && three.controlMode){
+      const totalDx = ev.clientX - lookDrag.startX, totalDy = ev.clientY - lookDrag.startY;
+      const movedPx = Math.hypot(totalDx, totalDy);
+      const elapsed = performance.now() - lookDrag.t;
+      if(movedPx < 12 && elapsed < 350){
+        const pt = screenToGroundPoint(ev.clientX, ev.clientY);
+        if(pt) three.clickMoveTarget = pt;
+      }
+    }
+    lookDrag = null;
+  });
   renderer.domElement.addEventListener('pointercancel', ()=>{ lookDrag = null; });
 
   const camera = new THREE.PerspectiveCamera(72, wrap.clientWidth/wrap.clientHeight, 0.05, 300);
@@ -3024,10 +3049,13 @@ function moveOffBallSupport(e, fp, dt, ballWorldPos){
     const aheadBias = dirSign*(1.5+Math.random()*1.5);
     targetX = Math.max(-HLc, Math.min(HLc, refX + aheadBias));
   } else {
-    // ala: acompanha a largura própria, avança/recua junto com a bola
+    // ala: acompanha a largura própria, avança quando o time ataca — mas
+    // recua pra ajudar quando o time perde a bola (padrão real de futsal)
     const lane = (three.aiLanes && three.aiLanes[e.id]!=null) ? three.aiLanes[e.id] : 0.5;
     targetZ = -(lane-0.5)*COURT_WID;
-    const aheadBias = dirSign*(3+Math.random()*3);
+    const holderNow = getBallHolderEntity();
+    const teamHasBall = holderNow && holderNow.team===e.team;
+    const aheadBias = teamHasBall ? dirSign*(3+Math.random()*3) : dirSign*0.5;
     targetX = Math.max(-HLc, Math.min(HLc, refX + aheadBias));
   }
   // regra: goleiro adversário com a bola -> não pressiona alto (exceto o
@@ -3218,6 +3246,8 @@ function renderControlFrame(dt){
   const moveVec = new THREE.Vector3();
   // durante o QTE o jogador fica "travado" na disputa, sem se mover livremente
   const qteActive = three.qte && !three.qte.resolved;
+  const manualInputActive = moveInput.fwd||moveInput.back||moveInput.left||moveInput.right;
+  if(manualInputActive) three.clickMoveTarget = null; // qualquer toque no direcional cancela o clique-pra-ir
   if(!qteActive){
     if(moveInput.fwd) moveVec.add(fwdDir);
     if(moveInput.back) moveVec.sub(fwdDir);
@@ -3229,6 +3259,19 @@ function renderControlFrame(dt){
     moveVec.normalize();
     three.manualPos.add(moveVec.multiplyScalar(runSpeed*dt));
     speed = runSpeed;
+  } else if(!qteActive && three.clickMoveTarget){
+    // clique-pra-ir: corre sozinho até o ponto que você tocou na quadra
+    const toTarget = three.clickMoveTarget.clone().sub(three.manualPos);
+    toTarget.y = 0;
+    const distToTarget = toTarget.length();
+    if(distToTarget<0.5){
+      three.clickMoveTarget = null;
+    } else {
+      toTarget.normalize();
+      three.manualPos.add(toTarget.multiplyScalar(runSpeed*dt));
+      three.manualYaw = Math.atan2(toTarget.x, -toTarget.z) - (three.freeLookYaw||0);
+      speed = runSpeed;
+    }
   }
   const HLc = COURT_LEN/2-0.5, HWc = COURT_WID/2-0.5;
   three.manualPos.x = Math.max(-HLc, Math.min(HLc, three.manualPos.x));
@@ -3577,6 +3620,7 @@ document.getElementById('controlModeBtn').onclick = ()=>{
     three.scriptedExec = null;
     three.justPassed = {};
     three.holdBackUntil = {};
+    three.clickMoveTarget = null;
     loadScriptedPlays();
     document.getElementById('scoreHUD').style.display = 'block';
     updateScoreHUD();
@@ -3638,6 +3682,14 @@ function openPassTargetPicker(isPivot){
 document.getElementById('passTargetCancel').onclick = ()=>{ document.getElementById('passTargetOverlay').style.display='none'; };
 document.getElementById('passBtn').addEventListener('click', ()=> openPassTargetPicker(false));
 document.getElementById('pivotPassBtn').addEventListener('click', ()=> openPassTargetPicker(true));
+document.getElementById('passToMeBtn').addEventListener('click', ()=>{
+  if(!three || !three.manualBallPos) return;
+  const holder = getBallHolderEntity();
+  if(!holder || holder.id===three.povId) return; // já é sua, ou ninguém com ela
+  const status = document.getElementById('status');
+  aiPass(holder.id, three.povId, false);
+  if(status){ status.textContent = '📥 pedindo a bola...'; setTimeout(()=>status.textContent='', 1200); }
+});
 
 // ---- minigame: sob pressão, escolha rápido pra quem passar (em vez de só tocar um botão) ----
 function startQTE(pivot, correctTargetId){
