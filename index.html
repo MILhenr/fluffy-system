@@ -2438,8 +2438,33 @@ function initThree(){
     cross.rotation.z = Math.PI/2; cross.position.set(xFace, gh, 0); group.add(cross);
     return group;
   }
+  // placa acima de cada gol, deixando claro de quem é: no gol de x=+HL fica
+  // o goleiro azul (é o gol que o time azul DEFENDE — o vermelho ataca ali);
+  // no gol de x=-HL fica o goleiro vermelho (é o gol que o azul ataca)
+  function buildGoalLabel(xSign, text, colorHex){
+    const cnv = document.createElement('canvas');
+    cnv.width = 512; cnv.height = 128;
+    const ctx2 = cnv.getContext('2d');
+    ctx2.fillStyle = 'rgba(10,10,10,0.75)';
+    ctx2.fillRect(0,0,512,128);
+    ctx2.fillStyle = colorHex;
+    ctx2.fillRect(0,0,14,128);
+    ctx2.fillStyle = '#fff';
+    ctx2.font = 'bold 58px sans-serif';
+    ctx2.textAlign = 'center'; ctx2.textBaseline = 'middle';
+    ctx2.fillText(text, 265, 64);
+    const tex = new THREE.CanvasTexture(cnv);
+    const mat = new THREE.SpriteMaterial({map:tex, depthTest:false});
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(5.2, 1.3, 1);
+    sprite.position.set(xSign*(HL-2.2), 3.6, 0);
+    sprite.renderOrder = 999;
+    return sprite;
+  }
   scene.add(buildGoalFrame(1));
   scene.add(buildGoalFrame(-1));
+  scene.add(buildGoalLabel(1, 'GOL AZUL', '#3a6fd8'));
+  scene.add(buildGoalLabel(-1, 'GOL VERMELHO', '#d84f3a'));
 
   // ---- arquibancada de verdade (fileiras), dos dois lados — cada lado pode
   // ser ligado/desligado independente, e cada lado também pode ter um banco
@@ -3028,6 +3053,26 @@ function isIsolatedWing1v1(markedId){
   return nearbyDefenders<=1;
 }
 
+// o goleiro é a última linha de defesa do próprio gol — acompanha a bola de
+// lado a lado, sempre pronto pra tentar a defesa (não fica parado)
+function moveGoalkeeper(e, fp, dt, ballWorldPos){
+  const isBlue = e.team==='blue';
+  const goalX = isBlue ? COURT_LEN/2 : -COURT_LEN/2; // o PRÓPRIO gol (o que ele defende)
+  const lineX = goalX + (isBlue ? -0.9 : 0.9); // fica um pouco à frente da linha, não colado na trave
+  const maxZ = 1.35; // não sai muito dos limites do gol
+  const targetZ = ballWorldPos ? Math.max(-maxZ, Math.min(maxZ, ballWorldPos.z*0.65)) : 0;
+  const toTarget = new THREE.Vector3(lineX-fp.x, 0, targetZ-fp.z);
+  const dist = toTarget.length();
+  const gkSpeed = 3.2;
+  let spd = 0;
+  if(dist>0.15){
+    toTarget.normalize();
+    fp.add(toTarget.multiplyScalar(Math.min(gkSpeed*dt, dist)));
+    spd = gkSpeed;
+  }
+  return spd;
+}
+
 function moveOffBallSupport(e, fp, dt, ballWorldPos){
   const isBlue = e.team==='blue';
   const role = (three.aiRoles && three.aiRoles[e.id]) || 'ala';
@@ -3200,13 +3245,44 @@ function aiPass(fromId, toId, wasForward){
 function aiShoot(holderId, goalX){
   const from = entityWorldPos(holderId);
   if(!from) return;
-  const to = new THREE.Vector3(goalX, 0, (Math.random()-0.5)*2.2);
+  const shooterEnt = three.snap.entities.find(x=>x.id===holderId);
+  // mira de propósito longe do goleiro adversário — pro lado mais aberto do gol
+  const gk = shooterEnt ? three.snap.entities.find(x=>x.isGoalkeeper && x.team!==shooterEnt.team) : null;
+  const gkZ = gk ? (entityWorldPos(gk.id)||{z:0}).z : 0;
+  const aimZ = (gkZ>=0 ? -1 : 1) * (1.15+Math.random()*0.5); // mira pro lado oposto ao goleiro
+  const to = new THREE.Vector3(goalX, 0, aimZ);
   const dist = from.distanceTo(to);
   three.passAnim = {from: from.clone(), to, start: performance.now(), duration: Math.max(180,(dist/(BALL_SPEED*1.7))*1000), isPivotPass:false, isShot:true};
   three.manualBallPos = null;
 }
 
 // ---- gol de verdade: conta no placar e reinicia o lance ----
+// o goleiro tenta defender de verdade: se a bola do chute cair perto o
+// suficiente de onde ele está, ele encaixa e a bola volta pro jogo
+function attemptGoalkeeperSave(ballPos){
+  if(!ballPos) return false;
+  const nearLeftGoal = ballPos.x < -COURT_LEN/2+2.2;
+  const nearRightGoal = ballPos.x > COURT_LEN/2-2.2;
+  if(!nearLeftGoal && !nearRightGoal) return false;
+  // o gol da esquerda (x negativo) é defendido pelo goleiro vermelho; o da
+  // direita, pelo azul — mesma convenção usada em todo o resto do sistema
+  const defendingTeam = nearLeftGoal ? 'red' : 'blue';
+  const gk = three.snap.entities.find(x=>x.isGoalkeeper && x.team===defendingTeam);
+  if(!gk) return false;
+  const gkPos = entityWorldPos(gk.id);
+  if(!gkPos) return false;
+  const saveReach = 1.5;
+  if(Math.abs(gkPos.z-ballPos.z) <= saveReach){
+    // defendeu! a bola volta pro jogo, perto do goleiro
+    three.manualBallPos = gkPos.clone();
+    three.manualBallPos.x += defendingTeam==='blue' ? -1.8 : 1.8;
+    three.aiPossession = null;
+    const status = document.getElementById('status');
+    if(status){ status.textContent = '🧤 defesa do goleiro!'; setTimeout(()=>status.textContent='', 1800); }
+    return true;
+  }
+  return false;
+}
 function checkGoal(){
   if(!three.manualBallPos || three.goalCooldown) return;
   const gx = three.manualBallPos.x, gz = three.manualBallPos.z;
@@ -3362,7 +3438,10 @@ function renderControlFrame(dt){
         }
       }
       const inScriptedExec = three.scriptedExec && scriptedLiveIds().includes(e.id);
-      if(!handledByChase && !e.isGoalkeeper && !inScriptedExec){
+      if(e.isGoalkeeper){
+        const spd = moveGoalkeeper(e, fp, dt, three.manualBallPos);
+        if(spd>0) chaseSpd = spd;
+      } else if(!handledByChase && !inScriptedExec){
         const spd = moveOffBallSupport(e, fp, dt, three.manualBallPos);
         if(spd>0){ chaseSpd = spd; mesh.rotation.y = Math.atan2(fp.x-mesh.position.x||0.001, fp.z-mesh.position.z||0.001); }
       } else if(inScriptedExec){
@@ -3405,7 +3484,7 @@ function renderControlFrame(dt){
         three.passAnim = null;
         three.aiPossession = null;
         if(wasShot){
-          checkGoal();
+          if(!attemptGoalkeeperSave(three.manualBallPos)) checkGoal();
         } else if(wasPivotPass && (!three.qte || three.qte.resolved)){
           const povEntityNow = three.snap.entities.find(e=>e.id===three.povId);
           if(povEntityNow){
