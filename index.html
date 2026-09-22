@@ -197,6 +197,9 @@
         <div id="goalFlash" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;z-index:40;pointer-events:none;">
           <div style="font-size:44px;font-weight:900;color:#fff;text-shadow:0 0 20px rgba(0,0,0,0.8), 0 0 40px #e0b84a;letter-spacing:2px;">⚽ GOL!</div>
         </div>
+        <div id="moveFeedbackFlash" style="display:none;position:absolute;top:22%;left:0;right:0;align-items:center;justify-content:center;z-index:40;pointer-events:none;">
+          <div id="moveFeedbackText" style="font-size:30px;font-weight:900;color:#fff;text-shadow:0 0 16px rgba(0,0,0,0.8);letter-spacing:1px;text-align:center;"></div>
+        </div>
       </div>
       <div id="controlPad" style="display:none;position:absolute;left:0;right:0;bottom:16px;justify-content:space-between;align-items:flex-end;padding:0 16px;pointer-events:none;">
         <div style="display:grid;grid-template-columns:56px 56px 56px;grid-template-rows:56px 56px 56px;gap:6px;pointer-events:auto;">
@@ -2329,14 +2332,50 @@ function initThree(){
     three.freeLookYaw = (three.freeLookYaw||0) - dx*sens;
     three.freeLookPitch = Math.max(-1.3, Math.min(1.3, (three.freeLookPitch||0) - dy*sens));
   });
+  function screenToTeammateHit(clientX, clientY){
+    if(!three || three.povId==null) return null;
+    const povEntNow = three.snap.entities.find(e=>e.id===three.povId);
+    if(!povEntNow) return null;
+    const rect = renderer.domElement.getBoundingClientRect();
+    const ndcX = ((clientX-rect.left)/rect.width)*2-1;
+    const ndcY = -((clientY-rect.top)/rect.height)*2+1;
+    raycaster.setFromCamera({x:ndcX, y:ndcY}, camera);
+    const candidateMeshes = [];
+    three.snap.entities.forEach(e=>{
+      if(e.id===three.povId || e.team!==povEntNow.team || e.team==='ball') return;
+      const mesh = three.meshes[e.id];
+      if(mesh){ mesh.userData.entityId = e.id; candidateMeshes.push(mesh); }
+    });
+    const hits = raycaster.intersectObjects(candidateMeshes, true);
+    if(hits.length===0) return null;
+    let obj = hits[0].object;
+    while(obj && obj.userData.entityId==null) obj = obj.parent;
+    return obj ? obj.userData.entityId : null;
+  }
+  function showQuickPassButton(clientX, clientY, targetId){
+    const old = document.getElementById('quickPassBtn');
+    if(old) old.remove();
+    const btn = document.createElement('button');
+    btn.id = 'quickPassBtn';
+    btn.textContent = '⚡ Passar';
+    btn.style.cssText = `position:fixed;left:${clientX-46}px;top:${clientY-56}px;z-index:60;background:#2c7a3f;border:2px solid #4aa862;color:#fff;padding:10px 16px;border-radius:20px;font-weight:700;font-size:13px;`;
+    document.body.appendChild(btn);
+    btn.onclick = ()=>{ doPass(targetId, false); btn.remove(); };
+    setTimeout(()=>{ if(btn.parentNode) btn.remove(); }, 2500);
+  }
   renderer.domElement.addEventListener('pointerup', (ev)=>{
     if(lookDrag && three && three.controlMode){
       const totalDx = ev.clientX - lookDrag.startX, totalDy = ev.clientY - lookDrag.startY;
       const movedPx = Math.hypot(totalDx, totalDy);
       const elapsed = performance.now() - lookDrag.t;
       if(movedPx < 12 && elapsed < 350){
-        const pt = screenToGroundPoint(ev.clientX, ev.clientY);
-        if(pt) three.clickMoveTarget = pt;
+        const teammateId = screenToTeammateHit(ev.clientX, ev.clientY);
+        if(teammateId!=null){
+          showQuickPassButton(ev.clientX, ev.clientY, teammateId);
+        } else {
+          const pt = screenToGroundPoint(ev.clientX, ev.clientY);
+          if(pt) three.clickMoveTarget = pt;
+        }
       }
     }
     lookDrag = null;
@@ -2760,7 +2799,7 @@ document.addEventListener('keyup', (ev)=>{
 });
 
 function checkScriptedPivotTriggers(prevT, newT, durs){
-  if(!three || (three.qte && !three.qte.resolved)) return;
+  if(!three || (three.qte && !three.qte.resolved) || three.controlMode) return;
   if(!three.triggeredPivotSteps) three.triggeredPivotSteps = new Set();
   const ballEnt = entities.find(e=>e.team==='ball');
   if(!ballEnt) return;
@@ -3009,8 +3048,17 @@ function scriptedLiveIds(){
 // movimento errado na dinâmica: em vez de mensagem de texto, quem te marca
 // vem e toma a bola de você de verdade — igual uma disputa real — e o jogo
 // segue aberto a partir daí (sem popup, sem reiniciar sozinho)
+function showMoveFeedback(text, colorHex){
+  const flash = document.getElementById('moveFeedbackFlash');
+  const el = document.getElementById('moveFeedbackText');
+  el.textContent = text;
+  el.style.textShadow = `0 0 16px rgba(0,0,0,0.8), 0 0 30px ${colorHex}`;
+  flash.style.display = 'flex';
+  setTimeout(()=>{ flash.style.display = 'none'; }, 1000);
+}
 function triggerMarkerSteal(){
   const ex = three.scriptedExec;
+  const playToRepeat = ex ? ex.play : null;
   three.scriptedExec = null;
   const povEnt = three.snap.entities.find(e=>e.id===three.povId);
   if(!povEnt || !three.manualPos) return;
@@ -3034,8 +3082,30 @@ function triggerMarkerSteal(){
   }
   three.passAnim = null;
   three.aiPossession = null;
-  const status = document.getElementById('status');
-  if(status){ status.textContent = '⚡ a marcação tomou a bola!'; setTimeout(()=>status.textContent='', 1500); }
+  showMoveFeedback('❌ Movimento errado', '#d84f3a');
+  if(playToRepeat) setTimeout(()=> restartPlayLoop(playToRepeat), 900);
+}
+// recoloca a jogada do zero (todo mundo na posição da etapa 1) e reinicia a
+// execução — usado pra fazer a coreografia rodar em loop infinito, tanto
+// quando você acerta e termina quanto quando erra e perde a bola
+function restartPlayLoop(play){
+  if(!three || !three.controlMode) return; // saiu do controle nesse meio tempo, não força nada
+  const mapping = {};
+  play.entities.forEach(en=>{ if(en.team!=='ball') mapping[en.id] = en.id; });
+  const step0 = play.steps[0];
+  Object.entries(mapping).forEach(([savedId, liveId])=>{
+    const sp = step0.positions[savedId];
+    if(!sp) return;
+    const w = toWorld(sp.x, sp.y);
+    if(liveId===three.povId) three.manualPos.copy(w);
+    else { const fp = three.frozenPositions[liveId]; if(fp) fp.copy(w); }
+  });
+  const ballEnt = play.entities.find(e=>e.team==='ball');
+  if(ballEnt){
+    const bp = step0.positions[ballEnt.id];
+    if(bp){ three.manualBallPos = toWorld(bp.x, bp.y); three.passAnim = null; }
+  }
+  initScriptedExecState(play, mapping, 0);
 }
 function updateScriptedExec(dt){
   const ex = three.scriptedExec;
@@ -3079,12 +3149,18 @@ function updateScriptedExec(dt){
     return;
   }
   if(minTimePassed){
+    if(ex.povSavedId!=null && povTargetW){
+      showMoveFeedback('👍 Boa!', '#4ade80');
+    }
     const oldHolderSaved = ballHolderInSavedStep(ex.play, ex.stepIdx);
     ex.stepIdx++;
     ex.stepStart = performance.now();
     ex.povStepStartPos = three.manualPos ? three.manualPos.clone() : null;
     if(ex.stepIdx>=ex.play.steps.length){
-      three.scriptedExec = null; // coreografia terminou, devolve o controle pra IA genérica
+      // terminou a jogada inteira — recomeça sozinha, sem parar (loop infinito)
+      const playToRepeat = ex.play;
+      three.scriptedExec = null;
+      setTimeout(()=> restartPlayLoop(playToRepeat), 700);
       return;
     }
     const newHolderSaved = ballHolderInSavedStep(ex.play, ex.stepIdx);
@@ -3484,7 +3560,9 @@ function renderControlFrame(dt){
   three.manualPos.z = Math.max(-HWc, Math.min(HWc, three.manualPos.z));
 
   // ---- detecta disputa: bola no seu pé + defensor perto = dispara o QTE ----
-  if(!three.qte && (!three.qteCooldownUntil || performance.now()>three.qteCooldownUntil) && !three.passAnim && three.manualBallPos){
+  // (desativado durante uma jogada ensaiada em execução — ali quem manda é o
+  // sistema novo de movimento/toque-pra-passar)
+  if(!three.scriptedExec && !three.qte && (!three.qteCooldownUntil || performance.now()>three.qteCooldownUntil) && !three.passAnim && three.manualBallPos){
     const carryingBall = three.manualBallPos.distanceTo(three.manualPos) < 1.2;
     if(carryingBall){
       let closestId = null, closestDist = Infinity;
