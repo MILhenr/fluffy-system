@@ -197,9 +197,6 @@
         <div id="goalFlash" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;z-index:40;pointer-events:none;">
           <div style="font-size:44px;font-weight:900;color:#fff;text-shadow:0 0 20px rgba(0,0,0,0.8), 0 0 40px #e0b84a;letter-spacing:2px;">⚽ GOL!</div>
         </div>
-        <div id="moveErrorFlash" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;z-index:40;pointer-events:none;">
-          <div style="font-size:32px;font-weight:900;color:#fff;text-shadow:0 0 20px rgba(0,0,0,0.8), 0 0 40px #d84f3a;letter-spacing:1px;text-align:center;">❌ Movimento errado<br><span style="font-size:16px;font-weight:600;">reiniciando a jogada...</span></div>
-        </div>
       </div>
       <div id="controlPad" style="display:none;position:absolute;left:0;right:0;bottom:16px;justify-content:space-between;align-items:flex-end;padding:0 16px;pointer-events:none;">
         <div style="display:grid;grid-template-columns:56px 56px 56px;grid-template-rows:56px 56px 56px;gap:6px;pointer-events:auto;">
@@ -3007,35 +3004,36 @@ function startCurrentPlayScript(){
 function scriptedLiveIds(){
   return three.scriptedExec ? Object.values(three.scriptedExec.mapping) : [];
 }
-function showScriptedMoveError(){
-  const flash = document.getElementById('moveErrorFlash');
-  flash.style.display = 'flex';
-  setTimeout(()=>{ flash.style.display = 'none'; }, 1200);
-  restartScriptedExec();
-}
-function restartScriptedExec(){
+// movimento errado na dinâmica: em vez de mensagem de texto, quem te marca
+// vem e toma a bola de você de verdade — igual uma disputa real — e o jogo
+// segue aberto a partir daí (sem popup, sem reiniciar sozinho)
+function triggerMarkerSteal(){
   const ex = three.scriptedExec;
-  if(!ex) return;
-  ex.stepIdx = 0;
-  ex.stepStart = performance.now();
-  const step0 = ex.play.steps[0];
-  Object.entries(ex.mapping).forEach(([savedId, liveId])=>{
-    const sp = step0.positions[savedId];
-    if(!sp) return;
-    const w = toWorld(sp.x, sp.y);
-    if(liveId===three.povId){
-      three.manualPos.copy(w);
-      ex.povStepStartPos = w.clone();
-    } else {
-      const fp = three.frozenPositions[liveId];
-      if(fp) fp.copy(w);
-    }
+  three.scriptedExec = null;
+  const povEnt = three.snap.entities.find(e=>e.id===three.povId);
+  if(!povEnt || !three.manualPos) return;
+  let markerId = null;
+  entities.forEach(op=>{
+    if(op.team===povEnt.team || op.team==='ball') return;
+    const pair = findPairEntity(op);
+    if(pair && pair.id===three.povId) markerId = op.id;
   });
-  const ballEnt = ex.play.entities.find(e=>e.team==='ball');
-  if(ballEnt){
-    const bp = step0.positions[ballEnt.id];
-    if(bp){ three.manualBallPos = toWorld(bp.x, bp.y); three.passAnim = null; }
+  const markerFp = markerId!=null ? three.frozenPositions[markerId] : null;
+  if(markerFp){
+    // o marcador fecha o espaço rápido e fica com a bola — a marcação dele
+    // já vinha te acompanhando, então isso lê como um bote de verdade
+    const toward = three.manualPos.clone().sub(markerFp).normalize();
+    markerFp.add(toward.multiplyScalar(1.3));
+    three.manualBallPos = markerFp.clone();
+  } else if(three.manualPos){
+    const stolenDir = new THREE.Vector3((Math.random()-0.5),0,(Math.random()-0.5));
+    if(stolenDir.lengthSq()<0.001) stolenDir.set(1,0,0);
+    three.manualBallPos = three.manualPos.clone().add(stolenDir.normalize().multiplyScalar(2.2));
   }
+  three.passAnim = null;
+  three.aiPossession = null;
+  const status = document.getElementById('status');
+  if(status){ status.textContent = '⚡ a marcação tomou a bola!'; setTimeout(()=>status.textContent='', 1500); }
 }
 function updateScriptedExec(dt){
   const ex = three.scriptedExec;
@@ -3075,7 +3073,7 @@ function updateScriptedExec(dt){
           const wentFarEnough = actualDist >= expectedDist*0.25;
           const wentRoughlyRightWay = actualDist>0.01 ? expectedDir.dot(actualDir.clone().normalize()) > 0.15 : false;
           if(!wentFarEnough || !wentRoughlyRightWay){
-            showScriptedMoveError();
+            triggerMarkerSteal();
             return;
           }
         }
