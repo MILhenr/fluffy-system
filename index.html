@@ -3036,6 +3036,18 @@ function moveOffBallSupport(e, fp, dt, ballWorldPos){
   if(role!=='pivo' && holder && holder.isGoalkeeper && holder.team!==e.team){
     targetX = fp.x*0.82 + targetX*0.18;
   }
+  // "jogador deu o passe e se movimenta sempre" — corrida de apoio (tabela)
+  // logo depois de passar
+  const justPassedAt = three.justPassed && three.justPassed[e.id];
+  if(justPassedAt && performance.now()-justPassedAt < 1800){
+    targetX += -dirSign*3.5; // continua o movimento pra frente do próprio passe
+  }
+  // "passe pra frente: 2 avançam, 1 segura atrás" — quem foi marcado como
+  // cobertura depois de um passe de progressão, segura a posição
+  const holdUntil = three.holdBackUntil && three.holdBackUntil[e.id];
+  if(holdUntil && performance.now()<holdUntil){
+    targetX = fp.x*0.7 + refX*0.3; // fica mais recuado, perto da própria linha de bola
+  }
   const toTarget = new THREE.Vector3(targetX-fp.x, 0, targetZ-fp.z);
   const dist = toTarget.length();
   const supportSpeed = 3.6;
@@ -3049,6 +3061,24 @@ function moveOffBallSupport(e, fp, dt, ballWorldPos){
 }
 
 // ---- posse de bola: quem está mais perto, decide (se não for você) ----
+// bola gruda em quem está segurando (perto o suficiente) e anda junto —
+// antes disso ela ficava largada no chão enquanto o jogador se afastava
+function updateBallCarry(dt){
+  if(!three.manualBallPos || three.passAnim) return;
+  let holderId=null, holderDist=Infinity;
+  three.snap.entities.forEach(e=>{
+    if(e.team==='ball') return;
+    const pos = entityWorldPos(e.id);
+    if(!pos) return;
+    const d = pos.distanceTo(three.manualBallPos);
+    if(d<holderDist){ holderDist=d; holderId=e.id; }
+  });
+  if(holderId==null || holderDist>1.6) return; // ninguém perto, bola solta no chão
+  const holderPos = entityWorldPos(holderId);
+  if(!holderPos) return;
+  three.manualBallPos.lerp(holderPos, Math.min(1, dt*13));
+}
+
 function updateBallPossessionAI(){
   if(!three.manualBallPos || three.passAnim || three.goalCooldown) { return; }
   let closestId=null, closestDist=Infinity;
@@ -3064,8 +3094,10 @@ function updateBallPossessionAI(){
     three.aiPossession = {holderId:closestId, since:performance.now(), decided:false};
   }
   if(closestId===three.povId) return; // você decide na mão (Passe / Passe Pivô)
+  // regra: bola sempre se movimenta rápido, no máximo 2 toques — não fica
+  // segurando/driblando à toa esperando a jogada perfeita
   const heldMs = performance.now()-three.aiPossession.since;
-  if(heldMs>750 && !three.aiPossession.decided){
+  if(heldMs>380 && !three.aiPossession.decided){
     three.aiPossession.decided = true;
     aiDecideAction(closestId);
   }
@@ -3099,21 +3131,43 @@ function aiDecideAction(holderId){
     const score = forwardness*0.7 + nearestDefDist;
     if(score>bestScore){ bestScore=score; bestId=e.id; }
   });
-  if(bestId!=null && bestScore>2.2){
-    aiPass(holderId, bestId);
+  // 2 toques: joga rápido pra melhor opção disponível — só "segura" (não
+  // existe mais essa opção) se realmente não tiver ninguém pra receber
+  if(bestId!=null){
+    const wasForward = bestScore>0; // o passe avançou o time
+    aiPass(holderId, bestId, wasForward);
   } else {
-    // sem opção boa agora: segue driblando, reavalia rapidinho
     three.aiPossession.decided = false;
-    three.aiPossession.since = performance.now() - 500;
+    three.aiPossession.since = performance.now() - 250;
   }
 }
-function aiPass(fromId, toId){
+function aiPass(fromId, toId, wasForward){
   const from = entityWorldPos(fromId);
   const to = entityWorldPos(toId);
   if(!from || !to) return;
   const dist = from.distanceTo(to);
   three.passAnim = {from: from.clone(), to: to.clone(), start: performance.now(), duration: Math.max(220,(dist/BALL_SPEED)*1000), isPivotPass:false};
   three.manualBallPos = null;
+  // "jogador deu o passe e se movimenta sempre" — marca corrida de
+  // apoio (tabela) por um instante depois de passar
+  if(!three.justPassed) three.justPassed = {};
+  three.justPassed[fromId] = performance.now();
+  // "passe pra frente: 2 avançam, 1 segura atrás" — entre quem sobrou (nem
+  // quem passou, nem quem recebeu), o fixo (ou o mais recuado) segura a
+  // posição como cobertura, os outros podem seguir avançando livre
+  if(wasForward){
+    const passerEnt = three.snap.entities.find(e=>e.id===fromId);
+    if(passerEnt){
+      const rest = three.snap.entities.filter(e=>e.team===passerEnt.team && e.id!==fromId && e.id!==toId && !e.isGoalkeeper && e.team!=='ball');
+      if(!three.holdBackUntil) three.holdBackUntil = {};
+      rest.forEach(e=>{
+        const role = three.aiRoles && three.aiRoles[e.id];
+        if(role==='fixo' || (!three.aiRoles || !three.aiRoles[e.id])){
+          three.holdBackUntil[e.id] = performance.now() + 2200;
+        }
+      });
+    }
+  }
 }
 function aiShoot(holderId, goalX){
   const from = entityWorldPos(holderId);
@@ -3326,6 +3380,7 @@ function renderControlFrame(dt){
         }
       }
     } else if(ballMesh && three.manualBallPos){
+      updateBallCarry(dt);
       ballMesh.position.copy(three.manualBallPos);
       if(three.scriptedExec){
         three.aiPossession = null; // a coreografia comanda o passe, não a IA genérica
@@ -3520,6 +3575,8 @@ document.getElementById('controlModeBtn').onclick = ()=>{
     three.goalCooldown = false;
     three.aiPossession = null;
     three.scriptedExec = null;
+    three.justPassed = {};
+    three.holdBackUntil = {};
     loadScriptedPlays();
     document.getElementById('scoreHUD').style.display = 'block';
     updateScoreHUD();
