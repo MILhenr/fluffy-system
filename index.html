@@ -876,7 +876,16 @@ document.getElementById('teachFormationBtn').onclick = ()=>{
     <select id="teachLabelSelect" style="width:100%;background:#111;border:1px solid #3a3a3a;color:#eee;padding:10px;border-radius:8px;margin-bottom:10px;">
       ${ALL_TRAINABLE_LABELS.map(l=>`<option value="${l}">${l}</option>`).join('')}
     </select>
-    <div id="teachPreview" style="font-size:12.5px;color:#ccc;margin-bottom:8px;"></div>
+    <div id="teachPreview" style="font-size:12.5px;color:#ccc;margin-bottom:10px;"></div>
+    <label style="font-size:12.5px;color:#ddd;display:block;margin-bottom:4px;">Quando o jogador com a bola tiver essa formação em volta, ele deve:</label>
+    <select id="teachDecisionSelect" style="width:100%;background:#111;border:1px solid #3a3a3a;color:#eee;padding:10px;border-radius:8px;margin-bottom:10px;">
+      <option value="">Deixa a IA decidir sozinha (padrão genérico)</option>
+      <option value="pass_to_pivo">Passar pro Pivô</option>
+      <option value="pass_to_fixo">Passar pro Fixo</option>
+      <option value="pass_to_ala">Passar pro Ala</option>
+      <option value="shoot">Chutar</option>
+      <option value="dribble">Avançar driblando</option>
+    </select>
     <div class="modalBtnRow">
       <button class="secondary" id="teachCancelBtn">Cancelar</button>
       <button id="teachSaveBtn">Salvar como modelo</button>
@@ -892,6 +901,7 @@ document.getElementById('teachFormationBtn').onclick = ()=>{
   document.getElementById('teachSaveBtn').onclick = async ()=>{
     if(!ball){ alert('Precisa ter uma bola em quadra pra ensinar uma formação.'); return; }
     const label = document.getElementById('teachLabelSelect').value;
+    const holderDecision = document.getElementById('teachDecisionSelect').value || null;
     const positions = steps[currentStep].positions;
     const active = computeActivePlayers(positions, ball.id);
     if(active.activeBlue.length===0 || active.activeRed.length===0){
@@ -900,7 +910,7 @@ document.getElementById('teachFormationBtn').onclick = ()=>{
     }
     // assume que o time azul já está atacando pra y menor (convenção do app)
     const players = makeTemplateFromSituation(positions, ball.id, active.activeBlue, active.activeRed, true);
-    formationTemplates.push({label, players, source:'taught', createdAt:Date.now()});
+    formationTemplates.push({label, players, source:'taught', createdAt:Date.now(), holderDecision});
     await saveFormationTemplates();
     overlay.remove();
     const status = document.getElementById('status');
@@ -3336,12 +3346,81 @@ function updateBallPossessionAI(){
     aiDecideAction(closestId);
   }
 }
+// converte posição do mundo 3D de volta pra fração (0..1), o mesmo espaço
+// usado pelos modelos ensinados — pra poder comparar "a formação ao vivo"
+// com o que você desenhou no editor
+function worldToFraction(pos){
+  return {x: 0.5 - pos.z/COURT_WID, y: pos.x/COURT_LEN + 0.5};
+}
+function shapeDistance(templatePlayers, liveShape){
+  const used = new Set();
+  let total = 0;
+  templatePlayers.forEach(tp=>{
+    let bestIdx=-1, bestD=Infinity;
+    liveShape.forEach((lp,i)=>{
+      if(used.has(i) || lp.team!==tp.team) return;
+      const d = Math.hypot(lp.dx-tp.dx, lp.dy-tp.dy);
+      if(d<bestD){ bestD=d; bestIdx=i; }
+    });
+    if(bestIdx>=0){ used.add(bestIdx); total+=bestD; } else total += 0.5;
+  });
+  return templatePlayers.length ? total/templatePlayers.length : Infinity;
+}
+// procura, entre as formações que você ensinou, a que mais se parece com a
+// situação ao vivo agora — e devolve a decisão que você marcou pra ela, se
+// houver uma parecida o suficiente
+function findTaughtDecision(holderId){
+  if(!three.manualBallPos) return null;
+  const holderEnt = three.snap.entities.find(e=>e.id===holderId);
+  if(!holderEnt || holderEnt.team!=='blue') return null; // regras ensinadas valem pro seu time (azul)
+  const positions = {};
+  three.snap.entities.forEach(e=>{
+    const pos = e.team==='ball' ? three.manualBallPos : entityWorldPos(e.id);
+    if(pos) positions[e.id] = worldToFraction(pos);
+  });
+  const ballEnt = three.snap.entities.find(e=>e.team==='ball');
+  if(!ballEnt || !positions[ballEnt.id]) return null;
+  const sit = classifySituation(positions, ballEnt.id, three.snap.entities);
+  const candidates = formationTemplates.filter(t=>t.label===sit.label && t.holderDecision);
+  if(candidates.length===0) return null;
+  const ballPos = positions[ballEnt.id];
+  const liveShape = [];
+  sit.active.activeBlue.concat(sit.active.activeRed).forEach(e=>{
+    const p = positions[e.id];
+    if(p) liveShape.push({team:e.team, dx:p.x-ballPos.x, dy:p.y-ballPos.y});
+  });
+  let best=null, bestDist=Infinity;
+  candidates.forEach(t=>{
+    const d = shapeDistance(t.players, liveShape);
+    if(d<bestDist){ bestDist=d; best=t; }
+  });
+  return (best && bestDist < 0.32) ? best.holderDecision : null;
+}
 function aiDecideAction(holderId){
   const holderEnt = three.snap.entities.find(e=>e.id===holderId);
   const holderPos = entityWorldPos(holderId);
   if(!holderEnt || !holderPos) return;
   const isBlue = holderEnt.team==='blue';
   const goalX = isBlue ? -COURT_LEN/2 : COURT_LEN/2; // azul ataca x negativo, vermelho ataca x positivo
+
+  // primeiro consulta se você ensinou uma regra pra uma formação parecida
+  // com essa — se sim, é isso que vale, não o palpite genérico
+  const taught = findTaughtDecision(holderId);
+  if(taught){
+    if(taught==='shoot'){ aiShoot(holderId, goalX); return; }
+    if(taught==='dribble'){ return; } // continua driblando por enquanto, reavalia na próxima checagem
+    const roleMap = {pass_to_pivo:'pivo', pass_to_fixo:'fixo', pass_to_ala:'ala'};
+    const targetRole = roleMap[taught];
+    if(targetRole){
+      const candidates = three.snap.entities.filter(e=>e.team===holderEnt.team && e.id!==holderId && !e.isGoalkeeper && e.team!=='ball' && three.aiRoles && three.aiRoles[e.id]===targetRole);
+      if(candidates.length>0){
+        aiPass(holderId, candidates[0].id, true);
+        return;
+      }
+    }
+    // não achou o papel-alvo em quadra agora — cai no palpite genérico abaixo
+  }
+
   const distToGoal = Math.abs(holderPos.x - goalX);
 
   if(distToGoal < 9){ aiShoot(holderId, goalX); return; }
@@ -3693,7 +3772,7 @@ function renderControlFrame(dt){
         three.aiPossession = null;
         if(wasShot){
           if(!attemptGoalkeeperSave(three.manualBallPos)) checkGoal();
-        } else if(wasPivotPass && (!three.qte || three.qte.resolved)){
+        } else if(wasPivotPass && !three.scriptedExec && (!three.qte || three.qte.resolved)){
           const povEntityNow = three.snap.entities.find(e=>e.id===three.povId);
           if(povEntityNow){
             let nearestId = null, nearestDist = Infinity;
