@@ -3106,20 +3106,28 @@ function assignAiLanes(){
   three.aiRoles = {};
   ['blue','red'].forEach(team=>{
     const isBlue = team==='blue';
-    const list = three.snap.entities.filter(e=>e.team===team && e.id!==three.povId && !e.isGoalkeeper);
-    const withPos = list.map(e=>{
+    const allTeamEnts = three.snap.entities.filter(e=>e.team===team && !e.isGoalkeeper);
+    // pivô é sempre a camisa #3 — fixo assim, não muda com a posição. Vale
+    // mesmo que seja você controlando: o papel fica registrado do mesmo jeito
+    const pivoEnt = allTeamEnts.find(e=>e.number===3);
+    if(pivoEnt) three.aiRoles[pivoEnt.id] = 'pivo';
+
+    const list = allTeamEnts.filter(e=>e.id!==three.povId && (!pivoEnt || e.id!==pivoEnt.id));
+    let rest = list.map(e=>{
       const p = entityWorldPos(e.id) || new THREE.Vector3(0,0,0);
       return {e, x:p.x, z:p.z};
     });
-    // o mais avançado no sentido do ataque do time vira pivô — ele é o
-    // ponto de referência lá na frente, não abaixa junto com o time
-    const sortedByAdvance = withPos.slice().sort((a,b)=> isBlue ? (a.x-b.x) : (b.x-a.x));
-    const pivo = sortedByAdvance[0];
-    const rest = sortedByAdvance.slice(1);
-    // dos que sobraram, os 2 mais largos viram alas; o resto vira fixo
+    if(!pivoEnt){
+      // não tem ninguém com a camisa 3 nesse time (raro) — cai no critério
+      // antigo (mais avançado) só pra garantir que sempre exista um pivô
+      const sortedByAdvance = rest.slice().sort((a,b)=> isBlue ? (a.x-b.x) : (b.x-a.x));
+      const fallbackPivo = sortedByAdvance[0];
+      if(fallbackPivo){ three.aiRoles[fallbackPivo.e.id]='pivo'; rest = rest.filter(w=>w!==fallbackPivo); }
+    }
+    // do que sobrou (números 1, 2, 4), os 2 mais largos viram alas; o
+    // restante vira fixo
     const sortedByWidth = rest.slice().sort((a,b)=> Math.abs(b.z)-Math.abs(a.z));
     const ala1 = sortedByWidth[0], ala2 = sortedByWidth[1];
-    if(pivo) three.aiRoles[pivo.e.id] = 'pivo';
     [ala1, ala2].forEach((a,i)=>{
       if(!a) return;
       three.aiRoles[a.e.id] = 'ala';
@@ -3805,6 +3813,7 @@ function resetAfterGoal(){
   three.aiPossession = null;
   three.scriptedExec = null;
   three.goalCooldown = false;
+  assignAiLanes(); // atualiza os papéis (agora fixos pela camisa) antes de reposicionar
 
   const ownGoalX = COURT_LEN/2; // gol que o azul defende
   three.manualBallPos = new THREE.Vector3(ownGoalX-5, 0, 0);
