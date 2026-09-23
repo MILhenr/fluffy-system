@@ -842,12 +842,13 @@ const SITUATION_POOL = [
 ];
 // fases do jogo — categorias que não dependem de contagem, e sim de contexto
 // (pressão, profundidade). Lista aberta: dá pra adicionar mais aqui depois.
-// Não têm detecção automática (isso exige leitura tática que só você tem) —
-// só existem através de "Ensinar formação" ou extraídas das suas jogadas.
+// Zonas alinhadas com a leitura real: saída de pressão = bola na primeira
+// fase (fundo); ataque sem pressão = um pouco mais pra frente; ataque
+// profundo = bola e time lá no campo adversário.
 const PHASE_POOL = [
-  {label:'Ataque profundo', yRange:[0.03, 0.25]},   // time todo lá na frente, atacando
-  {label:'Ataque sem pressão', yRange:[0.1, 0.5]},  // construindo sem marcação alta do adversário
-  {label:'Saída de pressão', yRange:[0.62, 0.95]},  // adversário pressionando alto, nós saindo lá de trás
+  {label:'Ataque profundo', yRange:[0.03, 0.29]},
+  {label:'Ataque sem pressão', yRange:[0.30, 0.61]},
+  {label:'Saída de pressão', yRange:[0.62, 0.95]},
 ];
 const ALL_TRAINABLE_LABELS = [...SITUATION_POOL.map(s=>s.label), ...PHASE_POOL.map(p=>p.label)];
 function actionYRangeForLabel(label){
@@ -3540,6 +3541,15 @@ function shapeDistance(templatePlayers, liveShape){
 // procura, entre as formações que você ensinou, a que mais se parece com a
 // situação ao vivo agora — e devolve a decisão que você marcou pra ela, se
 // houver uma parecida o suficiente
+// classifica a FASE pela zona da bola, do jeito que você explicou:
+// saída de pressão = bola na primeira fase (bem no fundo, perto do nosso
+// gol); ataque sem pressão = um pouco mais pra frente; ataque profundo =
+// bola (e o time) lá no campo adversário
+function classifyZonePhase(ballFy){
+  if(ballFy >= 0.62) return 'Saída de pressão';
+  if(ballFy >= 0.30) return 'Ataque sem pressão';
+  return 'Ataque profundo';
+}
 function findTaughtDecision(holderId){
   if(!three.manualBallPos) return null;
   const holderEnt = three.snap.entities.find(e=>e.id===holderId);
@@ -3552,7 +3562,11 @@ function findTaughtDecision(holderId){
   const ballEnt = three.snap.entities.find(e=>e.team==='ball');
   if(!ballEnt || !positions[ballEnt.id]) return null;
   const sit = classifySituation(positions, ballEnt.id, three.snap.entities);
-  const candidates = formationTemplates.filter(t=>t.label===sit.label && t.holderDecision);
+  const zonePhase = classifyZonePhase(positions[ballEnt.id].y);
+  // formações numéricas (1x1, Maioridade numérica...) comparam com a mesma
+  // classificação ao vivo; formações de FASE (Saída de pressão, Ataque
+  // profundo, Ataque sem pressão) comparam com a zona real da bola
+  const candidates = formationTemplates.filter(t=>t.holderDecision && (t.label===sit.label || t.label===zonePhase));
   if(candidates.length===0) return null;
   const ballPos = positions[ballEnt.id];
   const liveShape = [];
