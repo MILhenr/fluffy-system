@@ -1167,6 +1167,40 @@ function generateTrainingSituation(){
 }
 
 
+// garante que TODA jogada tem goleiro nos dois times ao entrar no 3D — tanto
+// jogadas novas quanto jogadas antigas, salvas antes dessa exigência existir
+function ensureGoalkeepers(){
+  let changed = false;
+  ['blue','red'].forEach(team=>{
+    if(entities.some(e=>e.team===team && e.isGoalkeeper)) return;
+    const teamMembers = entities.filter(e=>e.team===team);
+    if(teamMembers.length===0) return; // sem ninguém desse time em quadra, não força nada
+    const y = team==='blue' ? 0.94 : 0.06;
+    if(teamMembers.length < MAX_TEAM_SIZE){
+      const id = idCounter++;
+      const facingAngle = team==='blue' ? -Math.PI/2 : Math.PI/2;
+      entities.push({id, team, number: team==='blue'?nextBlueNum++:nextRedNum++, name:'Goleiro', heightM:randomHeightM(), isGoalkeeper:true});
+      addEntityToAllSteps(id, {x:0.5, y, facingAngle});
+    } else {
+      // time já no limite de 5 (jogada antiga sem goleiro marcado) — converte
+      // quem está mais perto do próprio gol na primeira etapa
+      const firstPos = steps[0] ? steps[0].positions : {};
+      let closestId=null, closestDist=Infinity;
+      teamMembers.forEach(e=>{
+        const p = firstPos[e.id];
+        if(!p) return;
+        const d = Math.abs(p.y - y);
+        if(d<closestDist){ closestDist=d; closestId=e.id; }
+      });
+      if(closestId!=null){
+        entities.find(e=>e.id===closestId).isGoalkeeper = true;
+        clampGoalkeeperPosition(entities.find(e=>e.id===closestId));
+      }
+    }
+    changed = true;
+  });
+  if(changed) recomputeAllStepsAutoFacing();
+}
 function populateBaseSquad(){
   const blueXs = [0.2,0.4,0.6,0.8];
   const redXs = [0.2,0.4,0.6,0.8];
@@ -3453,7 +3487,7 @@ function updateBallCarry(dt){
   if(holderId==null || holderDist>1.6) return; // ninguém perto, bola solta no chão
   const holderPos = entityWorldPos(holderId);
   if(!holderPos) return;
-  three.manualBallPos.lerp(holderPos, Math.min(1, dt*13));
+  three.manualBallPos.lerp(holderPos, Math.min(1, dt*40));
 }
 
 function updateBallPossessionAI(){
@@ -4083,6 +4117,7 @@ function render3DFrame(tt, dur, durs){
 }
 
 document.getElementById('goto3D').onclick = ()=>{
+  ensureGoalkeepers();
   document.getElementById('editorScreen').style.display = 'none';
   document.getElementById('viewer3D').style.display = 'flex';
   document.getElementById('viewer3D').classList.add('focusMode');
