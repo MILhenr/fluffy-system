@@ -1180,6 +1180,14 @@ function populateBaseSquad(){
     entities.push({id, team:'red', number:nextRedNum++, name:'', heightM:randomHeightM()});
     addEntityToAllSteps(id, {x, y:0.78, facingAngle:Math.PI/2});
   });
+  // goleiro sempre presente desde o início — travado na própria área, cada
+  // um no seu gol (vermelho no gol vermelho, azul no gol azul)
+  const gkBlueId = idCounter++;
+  entities.push({id:gkBlueId, team:'blue', number:nextBlueNum++, name:'Goleiro', heightM:randomHeightM(), isGoalkeeper:true});
+  addEntityToAllSteps(gkBlueId, {x:0.5, y:0.94, facingAngle:-Math.PI/2});
+  const gkRedId = idCounter++;
+  entities.push({id:gkRedId, team:'red', number:nextRedNum++, name:'Goleiro', heightM:randomHeightM(), isGoalkeeper:true});
+  addEntityToAllSteps(gkRedId, {x:0.5, y:0.06, facingAngle:Math.PI/2});
   recomputeAllStepsAutoFacing();
 }
 const MAX_TEAM_SIZE = 5; // futsal: 4 de linha + 1 goleiro
@@ -2455,6 +2463,7 @@ function initThree(){
   }
   renderer.domElement.addEventListener('pointerdown', (ev)=>{
     lookDrag = {x: ev.clientX, y: ev.clientY, startX: ev.clientX, startY: ev.clientY, t: performance.now()};
+    if(three) three.isLooking = true;
     renderer.domElement.setPointerCapture(ev.pointerId);
   });
   renderer.domElement.addEventListener('pointermove', (ev)=>{
@@ -2512,8 +2521,9 @@ function initThree(){
       }
     }
     lookDrag = null;
+    if(three) three.isLooking = false;
   });
-  renderer.domElement.addEventListener('pointercancel', ()=>{ lookDrag = null; });
+  renderer.domElement.addEventListener('pointercancel', ()=>{ lookDrag = null; if(three) three.isLooking = false; });
 
   const camera = new THREE.PerspectiveCamera(72, wrap.clientWidth/wrap.clientHeight, 0.05, 300);
 
@@ -3546,6 +3556,38 @@ function aiDecideAction(holderId){
 
   const distToGoal = Math.abs(holderPos.x - goalX);
 
+  // ala isolado, 1x1 na ala: em vez de ficar só trocando passe de lado a
+  // lado, puxa o defensor (avança reto nele) e depois de um instante decide
+  // — corta pra linha de fundo OU corta pra dentro — e finge de um lado
+  const role = three.aiRoles && three.aiRoles[holderId];
+  const isWide = Math.abs(holderPos.z) > COURT_WID*0.22;
+  if(role==='ala' && isWide){
+    let nearbyDefenders = 0;
+    three.snap.entities.forEach(d=>{
+      if(d.team===holderEnt.team || d.team==='ball') return;
+      const dp = entityWorldPos(d.id);
+      if(dp && dp.distanceTo(holderPos) < 5) nearbyDefenders++;
+    });
+    if(nearbyDefenders===1){
+      if(!three.wing1v1State || three.wing1v1State.holderId!==holderId){
+        three.wing1v1State = {holderId, committedAt: performance.now(), variant: Math.random()<0.5 ? 'byline' : 'inside'};
+      }
+      const sinceCommit = performance.now() - three.wing1v1State.committedAt;
+      if(sinceCommit < 850){
+        // ainda "puxando" o defensor — dribla reto nele, reavalia em seguida
+        three.aiPossession.decided = false;
+        three.aiPossession.since = performance.now() - 250;
+        return;
+      }
+      three.wing1v1State = null;
+      if(distToGoal < 16){ aiShoot(holderId, goalX); return; }
+      // longe demais ainda pra chutar: segue driblando rumo ao gol, reavalia rapidinho
+      three.aiPossession.decided = false;
+      three.aiPossession.since = performance.now() - 250;
+      return;
+    }
+  }
+
   if(distToGoal < 9){ aiShoot(holderId, goalX); return; }
 
   // procura o companheiro mais adiantado e mais livre de marcação
@@ -3806,6 +3848,11 @@ function renderControlFrame(dt){
   pitch = Math.max(-1.3, Math.min(1.3, pitch));
   const target = basePos.clone().add(dir.multiplyScalar(5));
   target.y = basePos.y + Math.tan(pitch)*5;
+  // sempre olhando pra bola por padrão, a não ser que você esteja mexendo
+  // na tela pra olhar pra outro lugar de propósito
+  if(!three.isLooking && three.manualBallPos){
+    target.copy(three.manualBallPos);
+  }
   three.camera.up.set(0,1,0);
   three.camera.lookAt(target);
 
@@ -4117,6 +4164,8 @@ document.getElementById('controlModeBtn').onclick = ()=>{
     three.justPassed = {};
     three.holdBackUntil = {};
     three.clickMoveTarget = null;
+    three.wing1v1State = null;
+    three.isLooking = false;
     loadScriptedPlays();
     startCurrentPlayScript();
     document.getElementById('scoreHUD').style.display = 'block';
@@ -4218,6 +4267,14 @@ function startQTE(pivot, correctTargetId){
     };
     choicesEl.appendChild(btn);
   });
+  // opção de chutar direto pro gol — nem toda disputa precisa terminar em passe
+  if(!pivot){
+    const goalBtn = document.createElement('button');
+    goalBtn.style.cssText = 'width:92px;height:92px;border-radius:16px;background:#2c7a3f;border:3px solid #fff;color:#fff;font-size:14px;font-weight:800;box-shadow:0 0 20px rgba(74,224,128,0.55);cursor:pointer;';
+    goalBtn.innerHTML = '⚽<br>GOL';
+    goalBtn.onclick = ()=> resolveQTE(three.qte.correctTargetId==null, 'GOAL');
+    choicesEl.appendChild(goalBtn);
+  }
   document.getElementById('qteOverlay').style.display = 'flex';
   document.getElementById('qteResult').textContent = pivot ? 'PRESSÃO! Pensa rápido: pra quem era o passe?' : 'Marcado! Escolha rápido';
   document.getElementById('qteResult').style.color = '#fff';
@@ -4232,9 +4289,19 @@ function resolveQTE(success, chosenTargetId){
   document.getElementById('qteChoices').innerHTML = '';
   const resultEl = document.getElementById('qteResult');
   if(success){
-    resultEl.textContent = '✅ Era pra ele mesmo! Tocou pra frente';
-    resultEl.style.color = '#4ade80';
-    if(chosenTargetId!=null) doPass(chosenTargetId, false);
+    if(chosenTargetId==='GOAL'){
+      resultEl.textContent = '⚽ Foi pro chute!';
+      resultEl.style.color = '#4ade80';
+      const povEnt = three.snap.entities.find(e=>e.id===three.povId);
+      if(povEnt){
+        const goalX = povEnt.team==='blue' ? -COURT_LEN/2 : COURT_LEN/2;
+        aiShoot(three.povId, goalX);
+      }
+    } else {
+      resultEl.textContent = '✅ Era pra ele mesmo! Tocou pra frente';
+      resultEl.style.color = '#4ade80';
+      if(chosenTargetId!=null) doPass(chosenTargetId, false);
+    }
   } else {
     resultEl.textContent = wasScripted ? '❌ Passe errado! Recomeçando o lance...' : (wasPivot ? '❌ Perdeu a bola no domínio!' : '❌ Perdeu a bola!');
     resultEl.style.color = '#ff6b6b';
