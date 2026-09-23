@@ -3408,6 +3408,10 @@ function moveGoalkeeper(e, fp, dt, ballWorldPos){
     fp.add(toTarget.multiplyScalar(Math.min(gkSpeed*dt, dist)));
     spd = gkSpeed;
   }
+  // trava dura por cima de tudo — nunca sai da área, não importa o que
+  // tenha empurrado ele antes nesse mesmo quadro
+  fp.x = isBlue ? Math.max(goalX-2.2, Math.min(goalX-0.2, fp.x)) : Math.max(goalX+0.2, Math.min(goalX+2.2, fp.x));
+  fp.z = Math.max(-maxZ, Math.min(maxZ, fp.z));
   return spd;
 }
 
@@ -3773,6 +3777,18 @@ function resetAfterGoal(){
     }
     if(e.id===three.povId) three.manualPos.copy(fp);
   });
+
+  // jogada de saída: o fixo começa com a bola e toca pra um dos alas —
+  // aleatório, tanto faz qual — e vai apoiar pro lado que ele mandou
+  const fixoEnt = three.snap.entities.find(e=>e.team==='blue' && !e.isGoalkeeper && three.aiRoles && three.aiRoles[e.id]==='fixo');
+  const alaEnts = three.snap.entities.filter(e=>e.team==='blue' && !e.isGoalkeeper && three.aiRoles && three.aiRoles[e.id]==='ala');
+  if(fixoEnt && fixoEnt.id!==three.povId && alaEnts.length>0){
+    const chosenAla = alaEnts[Math.floor(Math.random()*alaEnts.length)];
+    setTimeout(()=>{
+      if(!three || !three.controlMode || three.goalCooldown) return;
+      aiPass(fixoEnt.id, chosenAla.id, false);
+    }, 700);
+  }
 }
 
 
@@ -3882,10 +3898,10 @@ function renderControlFrame(dt){
       // acontecendo ao seu redor, não fica tudo parado esperando por você
       let chaseSpd = 0;
       let handledByChase = false;
-      if(e.team==='red'){
+      if(e.team==='red' && !e.isGoalkeeper){
         const ent2D = entities.find(x=>x.id===e.id);
         const pairEnt = ent2D ? findPairEntity(ent2D) : null;
-        if(pairEnt){
+        if(pairEnt && !pairEnt.isGoalkeeper){
           const targetPos = pairEnt.id===three.povId ? three.manualPos : three.frozenPositions[pairEnt.id];
           if(targetPos){
             handledByChase = true;
@@ -3907,6 +3923,9 @@ function renderControlFrame(dt){
       }
       const inScriptedExec = three.scriptedExec && scriptedLiveIds().includes(e.id);
       if(e.isGoalkeeper){
+        // simples de propósito: só balança um pouco de lado, sempre travado
+        // perto da linha do próprio gol — nada de perseguição, nada de
+        // decisão, só isso
         const spd = moveGoalkeeper(e, fp, dt, three.manualBallPos);
         if(spd>0) chaseSpd = spd;
       } else if(!handledByChase && !inScriptedExec){
