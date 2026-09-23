@@ -2555,8 +2555,10 @@ function initThree(){
     const ndcY = -((clientY-rect.top)/rect.height)*2+1;
     raycaster.setFromCamera({x:ndcX, y:ndcY}, camera);
     const candidateMeshes = [];
+    const gkAlreadyUsed = three.gkUsedThisPlay && three.gkUsedThisPlay[povEntNow.team];
     three.snap.entities.forEach(e=>{
       if(e.id===three.povId || e.team!==povEntNow.team || e.team==='ball') return;
+      if(e.isGoalkeeper && gkAlreadyUsed) return;
       const mesh = three.meshes[e.id];
       if(mesh){ mesh.userData.entityId = e.id; candidateMeshes.push(mesh); }
     });
@@ -3544,7 +3546,7 @@ function updateBallPossessionAI(){
   if(!three.manualBallPos || three.passAnim || three.goalCooldown) { return; }
   let closestId=null, closestDist=Infinity;
   three.snap.entities.forEach(e=>{
-    if(e.team==='ball' || e.isGoalkeeper) return;
+    if(e.team==='ball') return;
     const pos = entityWorldPos(e.id);
     if(!pos) return;
     const d = pos.distanceTo(three.manualBallPos);
@@ -3555,10 +3557,11 @@ function updateBallPossessionAI(){
     three.aiPossession = {holderId:closestId, since:performance.now(), decided:false};
   }
   if(closestId===three.povId) return; // você decide na mão (Passe / Passe Pivô)
-  // regra: bola sempre se movimenta rápido, no máximo 2 toques — não fica
-  // segurando/driblando à toa esperando a jogada perfeita
+  const holderEnt = three.snap.entities.find(e=>e.id===closestId);
+  // goleiro nunca segura — devolve na hora, sem o atraso normal de 2 toques
   const heldMs = performance.now()-three.aiPossession.since;
-  if(heldMs>380 && !three.aiPossession.decided){
+  const decideThreshold = (holderEnt && holderEnt.isGoalkeeper) ? 0 : 380;
+  if(heldMs>=decideThreshold && !three.aiPossession.decided){
     three.aiPossession.decided = true;
     aiDecideAction(closestId);
   }
@@ -3633,6 +3636,21 @@ function aiDecideAction(holderId){
   if(!holderEnt || !holderPos) return;
   const isBlue = holderEnt.team==='blue';
   const goalX = isBlue ? -COURT_LEN/2 : COURT_LEN/2; // azul ataca x negativo, vermelho ataca x positivo
+
+  // goleiro nunca decide sozinho tipo um jogador de linha — só devolve pro
+  // time, sempre, pra um jogador de linha qualquer (nunca chuta, nunca
+  // dribla). E marca que já usou o goleiro nessa jogada — "transparente pra
+  // passe" depois disso, ninguém mais pode passar pra ele até reiniciar
+  if(holderEnt.isGoalkeeper){
+    if(!three.gkUsedThisPlay) three.gkUsedThisPlay = {blue:false, red:false};
+    three.gkUsedThisPlay[holderEnt.team] = true;
+    const outfield = three.snap.entities.filter(e=>e.team===holderEnt.team && !e.isGoalkeeper && e.team!=='ball');
+    if(outfield.length>0){
+      const target = outfield[Math.floor(Math.random()*outfield.length)];
+      aiPass(holderId, target.id, false);
+    }
+    return;
+  }
 
   // primeiro consulta se você ensinou uma regra pra uma formação parecida
   // com essa — se sim, é isso que vale, não o palpite genérico
@@ -3813,6 +3831,7 @@ function resetAfterGoal(){
   three.aiPossession = null;
   three.scriptedExec = null;
   three.goalCooldown = false;
+  three.gkUsedThisPlay = {blue:false, red:false};
   assignAiLanes(); // atualiza os papéis (agora fixos pela camisa) antes de reposicionar
 
   const ownGoalX = COURT_LEN/2; // gol que o azul defende
@@ -4258,6 +4277,7 @@ document.getElementById('controlModeBtn').onclick = ()=>{
     three.clickMoveTarget = null;
     three.wing1v1State = null;
     three.isLooking = false;
+    three.gkUsedThisPlay = {blue:false, red:false};
     loadScriptedPlays();
     startCurrentPlayScript();
     document.getElementById('scoreHUD').style.display = 'block';
@@ -4291,7 +4311,8 @@ wireHoldButton('moveRightBtn','right');
 function getPassTargets(){
   const povEntity = three.snap.entities.find(e=>e.id===three.povId);
   if(!povEntity) return [];
-  return entities.filter(e=>e.team===povEntity.team && e.id!==three.povId && e.team!=='ball');
+  const gkAlreadyUsed = three.gkUsedThisPlay && three.gkUsedThisPlay[povEntity.team];
+  return entities.filter(e=>e.team===povEntity.team && e.id!==three.povId && e.team!=='ball' && !(e.isGoalkeeper && gkAlreadyUsed));
 }
 function doPass(targetId, isPivot){
   if(!three.controlMode || !three.manualPos) return;
