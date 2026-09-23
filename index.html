@@ -93,6 +93,7 @@
       <button id="backupBtn" class="iconbtn"><span class="ic">💾</span>Backup</button>
       <button id="restoreBackupBtn" class="iconbtn"><span class="ic">📥</span>Restaurar backup</button>
       <input type="file" id="restoreBackupInput" accept="application/json" style="display:none">
+      <button id="viewFormationsBtn" class="iconbtn"><span class="ic">📋</span>Ver formações</button>
       <span id="status"></span>
     </div>
     <div id="stepbar">
@@ -332,15 +333,21 @@ function drawCourt(){
     ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.fill();
   });
   // etiquetas claras de qual gol é de qual time — fy=0 (topo) é o gol que o
-  // azul ataca (gol do vermelho); fy=1 (embaixo) é o gol do azul
+  // azul ataca (gol do vermelho); fy=1 (embaixo) é o gol do azul. Desenhadas
+  // DENTRO da quadra (a borda de cima/baixo do canvas não tem espaço sobrando)
   ctx.save();
-  ctx.font = `700 ${Math.max(11, court.w*0.032)}px -apple-system, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 4;
-  ctx.fillStyle = '#e05b5b';
-  ctx.fillText('GOL VERMELHO', court.x+court.w/2, court.y-8);
-  ctx.fillStyle = '#5b8fef';
-  ctx.fillText('GOL AZUL', court.x+court.w/2, court.y+court.h+18);
+  const fSize = Math.max(11, court.w*0.032);
+  ctx.font = `800 ${fSize}px -apple-system, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  [{fy:0.085, text:'GOL VERMELHO', color:'#ff8a80'}, {fy:0.915, text:'GOL AZUL', color:'#8ab4ff'}].forEach(({fy,text,color})=>{
+    const p = toPx(0.5, fy);
+    const padX = fSize*0.5, padY = fSize*0.32;
+    const textW = ctx.measureText(text).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    roundRect(p.x-textW/2-padX, p.y-fSize/2-padY, textW+padX*2, fSize+padY*2, 6); ctx.fill();
+    ctx.fillStyle = color;
+    ctx.fillText(text, p.x, p.y+1);
+  });
   ctx.restore();
 }
 function roundRect(x,y,w,h,r){
@@ -1035,6 +1042,37 @@ document.getElementById('restoreBackupInput').addEventListener('change', (ev)=>{
   };
   reader.readAsText(file);
 });
+
+// lista as formações ensinadas/extraídas — pra você ver o que já tem
+// cadastrado e apagar o que não quiser mais, igual a lista de jogadas salvas
+document.getElementById('viewFormationsBtn').onclick = ()=>{
+  function render(){
+    const rows = formationTemplates.map((t,i)=>{
+      const when = t.createdAt ? new Date(t.createdAt).toLocaleString('pt-BR') : '';
+      const src = t.source==='taught' ? 'ensinada' : (t.source==='extracted' ? 'extraída' : t.source||'');
+      const decision = t.holderDecision ? ` · decisão: ${t.holderDecision.replace('pass_to_','passa pro ').replace('shoot','chuta').replace('dribble','dribla')}` : '';
+      return `<div class="movementItem">
+        <span class="mname">${t.label} <span style="color:#888;font-weight:400;">(${src}${decision})</span></span>
+        <span class="mdate">${when}</span>
+        <button class="del" data-i="${i}">🗑</button>
+      </div>`;
+    }).join('') || '<div style="color:#999;font-size:12.5px;">Nenhuma formação ensinada/extraída ainda.</div>';
+    document.getElementById('formationsListBody').innerHTML = rows;
+    document.querySelectorAll('#formationsListBody .del').forEach(btn=>{
+      btn.onclick = async ()=>{
+        formationTemplates.splice(parseInt(btn.dataset.i), 1);
+        await saveFormationTemplates();
+        render();
+      };
+    });
+  }
+  const overlay = openModal(`
+    <h3>📋 Formações ensinadas/extraídas</h3>
+    <div id="formationsListBody" style="max-height:420px;overflow-y:auto;"></div>
+    <div class="modalBtnRow"><button class="secondary" id="formationsCloseBtn">Fechar</button></div>`);
+  render();
+  document.getElementById('formationsCloseBtn').onclick = ()=> overlay.remove();
+};
 
 // gera uma situação de treino usando um MODELO REAL (ensinado ou extraído),
 // não posição aleatória sem sentido. Ainda adiciona jogadores extras longe
@@ -3684,7 +3722,7 @@ function renderControlFrame(dt){
   const povEntity = three.snap.entities.find(e=>e.id===three.povId);
   if(!povEntity || !three.manualPos) return;
 
-  const runSpeed = 8.5;
+  const runSpeed = 7.0;
   const yaw = three.manualYaw + (three.freeLookYaw||0);
   const fwdDir = new THREE.Vector3(Math.sin(yaw),0,-Math.cos(yaw));
   const rightDir = new THREE.Vector3(Math.sin(yaw+Math.PI/2),0,-Math.cos(yaw+Math.PI/2));
