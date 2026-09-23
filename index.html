@@ -90,6 +90,9 @@
       <button id="trainStatsBtn" class="iconbtn"><span class="ic">📊</span>Estatísticas</button>
       <button id="teachFormationBtn" class="iconbtn"><span class="ic">🎓</span>Ensinar formação</button>
       <button id="extractFormationsBtn" class="iconbtn"><span class="ic">🔍</span>Extrair de jogadas</button>
+      <button id="backupBtn" class="iconbtn"><span class="ic">💾</span>Backup</button>
+      <button id="restoreBackupBtn" class="iconbtn"><span class="ic">📥</span>Restaurar backup</button>
+      <input type="file" id="restoreBackupInput" accept="application/json" style="display:none">
       <span id="status"></span>
     </div>
     <div id="stepbar">
@@ -328,6 +331,17 @@ function drawCourt(){
     ctx.beginPath(); ctx.arc(p.x,p.y, court.w*0.01,0,Math.PI*2);
     ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.fill();
   });
+  // etiquetas claras de qual gol é de qual time — fy=0 (topo) é o gol que o
+  // azul ataca (gol do vermelho); fy=1 (embaixo) é o gol do azul
+  ctx.save();
+  ctx.font = `700 ${Math.max(11, court.w*0.032)}px -apple-system, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 4;
+  ctx.fillStyle = '#e05b5b';
+  ctx.fillText('GOL VERMELHO', court.x+court.w/2, court.y-8);
+  ctx.fillStyle = '#5b8fef';
+  ctx.fillText('GOL AZUL', court.x+court.w/2, court.y+court.h+18);
+  ctx.restore();
 }
 function roundRect(x,y,w,h,r){
   ctx.beginPath(); ctx.moveTo(x+r,y);
@@ -950,6 +964,77 @@ document.getElementById('extractFormationsBtn').onclick = async ()=>{
   status.textContent = `✓ ${extracted} formação(ões) extraída(s) de ${sample.length} jogada(s)`;
   setTimeout(()=>status.textContent='', 4000);
 };
+
+// ---------------------------------------------------------------------------
+// BACKUP — os dados hoje ficam presos no navegador/aparelho onde você está
+// (não sincronizam sozinhos entre celular e iPad, por exemplo, e se o
+// navegador limpar os dados, perde tudo). Isso exporta um arquivo .json com
+// tudo que importa (formações ensinadas, jogadas salvas, estatísticas), pra
+// você guardar e restaurar em qualquer aparelho quando precisar.
+document.getElementById('backupBtn').onclick = async ()=>{
+  const status = document.getElementById('status');
+  status.textContent = 'preparando backup...';
+  try{
+    const backup = {version:1, exportedAt:Date.now()};
+    backup.formationTemplates = formationTemplates;
+    const index = await ensureMovementsIndex();
+    backup.movementsIndex = index;
+    backup.movements = {};
+    for(const item of index){
+      try{ const r = await storageGet(item.key); if(r&&r.value) backup.movements[item.key] = r.value; }catch(e){}
+    }
+    try{ const r = await storageGet('training_stats'); if(r&&r.value) backup.trainingStats = r.value; }catch(e){}
+    const blob = new Blob([JSON.stringify(backup)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `backup_prancha_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 2000);
+    status.textContent = '✓ backup baixado';
+    setTimeout(()=>status.textContent='', 2500);
+  }catch(e){
+    console.error(e);
+    status.textContent = 'erro ao gerar backup';
+    setTimeout(()=>status.textContent='', 2500);
+  }
+};
+document.getElementById('restoreBackupBtn').onclick = ()=> document.getElementById('restoreBackupInput').click();
+document.getElementById('restoreBackupInput').addEventListener('change', (ev)=>{
+  const file = ev.target.files[0];
+  ev.target.value = '';
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e)=>{
+    const status = document.getElementById('status');
+    try{
+      const backup = JSON.parse(e.target.result);
+      if(Array.isArray(backup.formationTemplates)){
+        formationTemplates = formationTemplates.concat(backup.formationTemplates);
+        await saveFormationTemplates();
+      }
+      if(backup.movements){
+        for(const key in backup.movements){
+          await storageSet(key, backup.movements[key]);
+        }
+      }
+      if(Array.isArray(backup.movementsIndex)){
+        const curIndex = await ensureMovementsIndex();
+        const existingKeys = new Set(curIndex.map(i=>i.key));
+        backup.movementsIndex.forEach(item=>{ if(!existingKeys.has(item.key)) curIndex.push(item); });
+        await saveMovementsIndex(curIndex);
+      }
+      if(backup.trainingStats){
+        await storageSet('training_stats', backup.trainingStats);
+      }
+      status.textContent = '✓ backup restaurado';
+      setTimeout(()=>status.textContent='', 3000);
+    }catch(err){
+      console.error(err);
+      alert('Não consegui ler esse arquivo de backup. Confere se é o arquivo certo.');
+    }
+  };
+  reader.readAsText(file);
+});
 
 // gera uma situação de treino usando um MODELO REAL (ensinado ou extraído),
 // não posição aleatória sem sentido. Ainda adiciona jogadores extras longe
